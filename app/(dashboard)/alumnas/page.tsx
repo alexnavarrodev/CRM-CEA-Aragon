@@ -230,11 +230,11 @@ function AlumnaModal({ alumna, grupos, onSave, onBaja, onClose }: {
   const [telefono, setTelefono] = useState(alumna?.telefono ?? '')
   const [email, setEmail] = useState(alumna?.email ?? '')
   const [grupoId, setGrupoId] = useState(alumna?.grupo_id ?? '')
-  const [cuota, setCuota] = useState(alumna?.cuota_mensual?.toString() ?? '800')
+  const [cuota, setCuota] = useState(alumna?.cuota_mensual?.toString() ?? '1000')
   const [programa, setPrograma] = useState<AlumnaPrograma>(alumna?.programa ?? 'colegiaturas')
   const [status, setStatus] = useState<AlumnaStatus>(alumna?.status ?? 'activa')
-  const [promedio, setPromedio] = useState(alumna?.promedio?.toString() ?? '8')
-  const [asistencia, setAsistencia] = useState(alumna?.asistencia_pct?.toString() ?? '90')
+  const [promedio, setPromedio] = useState(alumna?.promedio?.toString() ?? '0')
+  const [asistencia, setAsistencia] = useState(alumna?.asistencia_pct?.toString() ?? '0')
   const [notas, setNotas] = useState(alumna?.notas ?? '')
 
   const handleSubmit = () => {
