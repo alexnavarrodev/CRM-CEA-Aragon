@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Alumna, MovimientoCaja, MovimientoTipo, Canal, MESES } from '@/lib/types'
-import { Plus, TrendingUp, TrendingDown, X, ArrowUpRight, ArrowDownRight, User } from 'lucide-react'
+import { Plus, TrendingUp, TrendingDown, X, ArrowUpRight, ArrowDownRight, User, Trash2 } from 'lucide-react'
 
 // ─── Labels ──────────────────────────────────────────────────────────────────
 const CATEGORIA_LABELS: Record<string, string> = {
@@ -47,6 +47,7 @@ export default function CajaPage() {
   })
   const [busqueda, setBusqueda] = useState('')
   const [modal, setModal] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const supabase = createClient()
 
@@ -152,9 +153,9 @@ export default function CajaPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('¿Eliminar este movimiento?')) return
     await supabase.from('movimientos_caja').delete().eq('id', id)
     setMovimientos(prev => prev.filter(m => m.id !== id))
+    setConfirmDelete(null)
   }
 
   const mesesOpciones = Array.from({ length: 12 }, (_, i) => {
@@ -250,7 +251,7 @@ export default function CajaPage() {
               </thead>
               <tbody>
                 {filtrados.map(m => (
-                  <tr key={m.id} className="border-t border-slate-50 hover:bg-slate-50/40 transition group">
+                  <tr key={m.id} className="border-t border-slate-50 hover:bg-slate-50/40 transition">
                     <td className="px-5 py-3.5 text-slate-500 text-xs whitespace-nowrap">
                       {new Date(m.fecha + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}
                     </td>
@@ -286,9 +287,12 @@ export default function CajaPage() {
                       {m.tipo === 'ingreso' ? '+' : '-'}${Number(m.monto).toLocaleString('es-MX')}
                     </td>
                     <td className="px-3 py-3.5">
-                      <button onClick={() => handleDelete(m.id)}
-                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-50 rounded-lg transition text-slate-300 hover:text-red-400">
-                        <X className="w-3.5 h-3.5" />
+                      <button
+                        onClick={() => setConfirmDelete(m.id)}
+                        className="p-1.5 hover:bg-red-50 rounded-lg transition text-slate-300 hover:text-red-400"
+                        title="Eliminar registro"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </td>
                   </tr>
@@ -300,6 +304,33 @@ export default function CajaPage() {
       </div>
 
       {modal && <MovimientoModal onSave={handleAdd} onClose={() => setModal(false)} />}
+
+      {/* Confirm delete dialog */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={() => setConfirmDelete(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs mx-4 animate-fade-in p-6"
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-center w-12 h-12 bg-red-50 rounded-full mx-auto mb-4">
+              <Trash2 className="w-5 h-5 text-red-500" />
+            </div>
+            <h3 className="text-center font-semibold text-slate-900 mb-1">Eliminar registro</h3>
+            <p className="text-center text-sm text-slate-400 mb-6">
+              Esta acción no se puede deshacer.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmDelete(null)}
+                className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition">
+                Cancelar
+              </button>
+              <button onClick={() => handleDelete(confirmDelete)}
+                className="flex-1 py-2.5 bg-red-500 text-white rounded-xl text-sm font-medium hover:bg-red-600 transition">
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
