@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Alumna, Grupo, PagoColegiatura, MESES, PagoEstado, DIA_COLORS } from '@/lib/types'
-import { Plus, Check, X } from 'lucide-react'
+import { Plus, Check, X, ChevronDown, ChevronUp } from 'lucide-react'
 
 // ─── Rango NOV 2025 → DIC 2027 ───────────────────────────────────────────────
 type Columna = { anio: number; mes: number; label: string; key: string }
@@ -41,6 +41,7 @@ export default function ColegiatutasPage() {
   const [busqueda, setBusqueda] = useState('')
   const [modal, setModal] = useState<{ alumna: Alumna; anio: number; mes: number } | null>(null)
   const [loading, setLoading] = useState(true)
+  const [headerOpen, setHeaderOpen] = useState(true)
   const supabase = createClient()
 
   const load = useCallback(async () => {
@@ -114,56 +115,72 @@ export default function ColegiatutasPage() {
   return (
     <div className="flex flex-col h-full animate-fade-in">
       {/* Header */}
-      <div className="px-6 py-5 bg-white border-b border-slate-200 flex-shrink-0">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Colegiaturas</h1>
-            <p className="text-sm text-slate-400 mt-0.5">
-              Total cobrado{' '}
-              <span className="font-semibold text-slate-700">${totalCobrado.toLocaleString('es-MX')}</span>
-              {' '}· Nov 2025 — Dic 2027
-            </p>
+      <div className="px-4 md:px-6 py-4 bg-white border-b border-slate-200 flex-shrink-0">
+        {/* Title row */}
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setHeaderOpen(o => !o)}
+              className="p-1 rounded-lg hover:bg-slate-100 transition text-slate-400"
+              title={headerOpen ? 'Colapsar' : 'Expandir'}
+            >
+              {headerOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+            <div>
+              <h1 className="text-xl md:text-2xl font-bold text-slate-900">Colegiaturas</h1>
+              {headerOpen && (
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Total cobrado{' '}
+                  <span className="font-semibold text-slate-700">${totalCobrado.toLocaleString('es-MX')}</span>
+                  {' '}· Nov 2025 — Dic 2027
+                </p>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Group filters */}
-        <div className="flex items-center gap-2 flex-wrap mb-3">
-          <button onClick={() => setGrupoFiltro('todos')}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium border transition ${grupoFiltro === 'todos' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
-            Todos los grupos
-          </button>
-          {grupos.map(g => {
-            const c = DIA_COLORS[g.dia] || { bg: '#94A3B8', text: '#fff' }
-            const active = grupoFiltro === g.id
-            return (
-              <button key={g.id} onClick={() => setGrupoFiltro(active ? 'todos' : g.id)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition border"
-                style={{ background: active ? c.bg : '#fff', color: active ? c.text : '#475569', borderColor: active ? c.bg : '#E2E8F0' }}>
-                <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style={{ background: c.bg }}>{g.dia}</span>
-                {g.nombre}
+        {headerOpen && (
+          <>
+            {/* Group filters */}
+            <div className="flex items-center gap-2 flex-wrap mb-3">
+              <button onClick={() => setGrupoFiltro('todos')}
+                className={`px-4 py-1.5 rounded-full text-sm font-medium border transition ${grupoFiltro === 'todos' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
+                Todos los grupos
               </button>
-            )
-          })}
-        </div>
+              {grupos.map(g => {
+                const c = DIA_COLORS[g.dia] || { bg: '#94A3B8', text: '#fff' }
+                const active = grupoFiltro === g.id
+                return (
+                  <button key={g.id} onClick={() => setGrupoFiltro(active ? 'todos' : g.id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition border"
+                    style={{ background: active ? c.bg : '#fff', color: active ? c.text : '#475569', borderColor: active ? c.bg : '#E2E8F0' }}>
+                    <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style={{ background: c.bg }}>{g.dia}</span>
+                    {g.nombre}
+                  </button>
+                )
+              })}
+            </div>
 
-        {/* Search + estado */}
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar alumna..."
-              className="pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white w-56" />
-            <svg className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-          </div>
-          {(['pagado', 'parcial', 'pendiente'] as PagoEstado[]).map(e => (
-            <label key={e} className="flex items-center gap-2 cursor-pointer select-none">
-              <input type="checkbox" checked={filtroEstado.includes(e)} onChange={() => toggleFiltro(e)}
-                className="w-4 h-4 rounded accent-blue-600" />
-              <span className="text-sm text-slate-600">{e === 'pagado' ? 'Pagado' : e === 'parcial' ? 'Parcial' : 'Pendiente'}</span>
-              {e === 'parcial' && <span className="w-3 h-3 rounded bg-amber-500 inline-block" />}
-            </label>
-          ))}
-        </div>
+            {/* Search + estado */}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative">
+                <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar alumna..."
+                  className="pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white w-56" />
+                <svg className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+              {(['pagado', 'parcial', 'pendiente'] as PagoEstado[]).map(e => (
+                <label key={e} className="flex items-center gap-2 cursor-pointer select-none">
+                  <input type="checkbox" checked={filtroEstado.includes(e)} onChange={() => toggleFiltro(e)}
+                    className="w-4 h-4 rounded accent-blue-600" />
+                  <span className="text-sm text-slate-600">{e === 'pagado' ? 'Pagado' : e === 'parcial' ? 'Parcial' : 'Pendiente'}</span>
+                  {e === 'parcial' && <span className="w-3 h-3 rounded bg-amber-500 inline-block" />}
+                </label>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Table */}

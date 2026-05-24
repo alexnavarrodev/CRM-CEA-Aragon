@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Alumna, Grupo, PagoBachillerato, DIA_COLORS } from '@/lib/types'
-import { Check, Plus, X, GraduationCap } from 'lucide-react'
+import { Check, Plus, X, GraduationCap, ChevronDown, ChevronUp } from 'lucide-react'
 
 const TIPOS = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'] as const
 type TipoMes = typeof TIPOS[number]
@@ -40,6 +40,7 @@ export default function BachilleratoPage() {
   const [busqueda, setBusqueda] = useState('')
   const [modal, setModal] = useState<{ alumna: Alumna; anio: number; tipo: TipoMes } | null>(null)
   const [loading, setLoading] = useState(true)
+  const [headerOpen, setHeaderOpen] = useState(true)
   const supabase = createClient()
 
   const load = useCallback(async () => {
@@ -106,44 +107,58 @@ export default function BachilleratoPage() {
   return (
     <div className="flex flex-col h-full animate-fade-in">
       {/* Header */}
-      <div className="px-6 py-5 bg-white border-b border-slate-200 flex-shrink-0">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Bachillerato</h1>
-            <p className="text-sm text-slate-400 mt-0.5">Plan de pagos Nov 2025 – Dic 2027</p>
+      <div className="px-4 md:px-6 py-4 bg-white border-b border-slate-200 flex-shrink-0">
+        {/* Title row */}
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setHeaderOpen(o => !o)}
+              className="p-1 rounded-lg hover:bg-slate-100 transition text-slate-400"
+              title={headerOpen ? 'Colapsar' : 'Expandir'}
+            >
+              {headerOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+            <div>
+              <h1 className="text-xl md:text-2xl font-bold text-slate-900">Bachillerato</h1>
+              {headerOpen && <p className="text-xs text-slate-400 mt-0.5">Plan de pagos Nov 2025 – Dic 2027</p>}
+            </div>
           </div>
         </div>
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-4 gap-3 mb-4">
-          <div className="bg-blue-50 rounded-xl p-3 border border-blue-100">
-            <p className="text-xs text-blue-600 font-medium">Total cobrado</p>
-            <p className="text-xl font-bold text-blue-700">${totalPagado.toLocaleString('es-MX')}</p>
-          </div>
-          <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-            <p className="text-xs text-slate-500 font-medium">Alumnas en Bachi</p>
-            <p className="text-xl font-bold text-slate-700">{alumnas.length}</p>
-          </div>
-          <div className="bg-emerald-50 rounded-xl p-3 border border-emerald-100">
-            <p className="text-xs text-emerald-600 font-medium">Avance de pagos</p>
-            <p className="text-xl font-bold text-emerald-700">{avancePct}%</p>
-          </div>
-          <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-            <p className="text-xs text-slate-500 font-medium">Pagos registrados</p>
-            <p className="text-xl font-bold text-slate-700">{celdasPagadas}</p>
-          </div>
-        </div>
+        {headerOpen && (
+          <>
+            {/* KPI Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mb-3">
+              <div className="bg-blue-50 rounded-xl p-2.5 md:p-3 border border-blue-100">
+                <p className="text-[10px] md:text-xs text-blue-600 font-medium">Total cobrado</p>
+                <p className="text-base md:text-xl font-bold text-blue-700 truncate">${totalPagado.toLocaleString('es-MX')}</p>
+              </div>
+              <div className="bg-slate-50 rounded-xl p-2.5 md:p-3 border border-slate-200">
+                <p className="text-[10px] md:text-xs text-slate-500 font-medium">Alumnas en Bachi</p>
+                <p className="text-base md:text-xl font-bold text-slate-700">{alumnas.length}</p>
+              </div>
+              <div className="bg-emerald-50 rounded-xl p-2.5 md:p-3 border border-emerald-100">
+                <p className="text-[10px] md:text-xs text-emerald-600 font-medium">Avance de pagos</p>
+                <p className="text-base md:text-xl font-bold text-emerald-700">{avancePct}%</p>
+              </div>
+              <div className="bg-slate-50 rounded-xl p-2.5 md:p-3 border border-slate-200">
+                <p className="text-[10px] md:text-xs text-slate-500 font-medium">Pagos registrados</p>
+                <p className="text-base md:text-xl font-bold text-slate-700">{celdasPagadas}</p>
+              </div>
+            </div>
 
-        {/* Search */}
-        <div className="relative w-56">
-          <input
-            value={busqueda}
-            onChange={e => setBusqueda(e.target.value)}
-            placeholder="Buscar alumna..."
-            className="pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white w-full"
-          />
-          <svg className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-        </div>
+            {/* Search */}
+            <div className="relative w-full md:w-56">
+              <input
+                value={busqueda}
+                onChange={e => setBusqueda(e.target.value)}
+                placeholder="Buscar alumna..."
+                className="pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white w-full"
+              />
+              <svg className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Table */}
