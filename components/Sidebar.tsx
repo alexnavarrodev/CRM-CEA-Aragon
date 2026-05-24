@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import {
   LayoutDashboard, CreditCard, GraduationCap, Wallet,
-  UserPlus, Users, UserCheck, BarChart2, Settings, LogOut, Search,
+  UserPlus, Users, UserCheck, UsersRound, BarChart2, Settings, LogOut, Search,
 } from 'lucide-react'
 
 const nav = [
@@ -23,6 +23,7 @@ const nav = [
     items: [
       { href: '/prospectos', label: 'Prospectos', icon: UserPlus },
       { href: '/alumnas',    label: 'Alumnas',    icon: Users },
+      { href: '/grupos',     label: 'Grupos',     icon: UsersRound },
       { href: '/egresadas',  label: 'Egresadas',  icon: UserCheck },
     ],
   },

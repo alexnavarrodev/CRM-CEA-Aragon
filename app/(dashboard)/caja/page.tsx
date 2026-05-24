@@ -93,7 +93,7 @@ export default function CajaPage() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Caja</h1>
-            <p className="text-sm text-slate-400 mt-0.5">Control de ingresos y egresos</p>
+            <p className="text-sm text-slate-400 mt-0.5">Control de ingresos y gastos</p>
           </div>
           <button
             onClick={() => setModal(true)}
@@ -115,7 +115,7 @@ export default function CajaPage() {
           <div className="bg-red-50 rounded-xl p-3 border border-red-100">
             <div className="flex items-center gap-1.5 mb-1">
               <TrendingDown className="w-3.5 h-3.5 text-red-500" />
-              <p className="text-xs text-red-600 font-medium">Egresos</p>
+              <p className="text-xs text-red-600 font-medium">Gastos</p>
             </div>
             <p className="text-xl font-bold text-red-600">${totalEgresos.toLocaleString('es-MX')}</p>
           </div>
@@ -139,7 +139,7 @@ export default function CajaPage() {
           {(['todos', 'ingreso', 'egreso'] as const).map(t => (
             <button key={t} onClick={() => setFiltroTipo(t)}
               className={`px-4 py-1.5 rounded-full text-sm font-medium border transition ${filtroTipo === t ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
-              {t === 'todos' ? 'Todos' : t === 'ingreso' ? 'Ingresos' : 'Egresos'}
+              {t === 'todos' ? 'Todos' : t === 'ingreso' ? 'Ingresos' : 'Gastos'}
             </button>
           ))}
           <div className="relative ml-auto">
@@ -256,7 +256,7 @@ function MovimientoModal({ onSave, onClose }: {
             </button>
             <button onClick={() => { setTipo('egreso'); setCategoria('renta') }}
               className={`py-2 rounded-lg text-sm font-medium transition ${tipo === 'egreso' ? 'bg-white text-red-600 shadow-sm' : 'text-slate-500'}`}>
-              Egreso
+              Gasto
             </button>
           </div>
 
