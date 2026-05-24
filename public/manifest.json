@@ -1,0 +1,25 @@
+{
+  "name": "CRM Florencia Nightingale",
+  "short_name": "CRM FN",
+  "description": "Gestión de la Escuela de Enfermería Florencia Nightingale",
+  "start_url": "/voz",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0F172A",
+  "theme_color": "#2563EB",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
