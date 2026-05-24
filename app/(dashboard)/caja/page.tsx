@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Alumna, MovimientoCaja, MovimientoTipo, Canal, MESES } from '@/lib/types'
-import { Plus, TrendingUp, TrendingDown, X, ArrowUpRight, ArrowDownRight, User, Trash2 } from 'lucide-react'
+import { Plus, TrendingUp, TrendingDown, X, ArrowUpRight, ArrowDownRight, User, Trash2, Pencil } from 'lucide-react'
 
 // ─── Labels ──────────────────────────────────────────────────────────────────
 const CATEGORIA_LABELS: Record<string, string> = {
@@ -47,6 +47,7 @@ export default function CajaPage() {
   })
   const [busqueda, setBusqueda] = useState('')
   const [modal, setModal] = useState(false)
+  const [editModal, setEditModal] = useState<MovRow | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const supabase = createClient()
@@ -152,6 +153,20 @@ export default function CajaPage() {
     setModal(false)
   }
 
+  const handleUpdate = async (id: string, changes: {
+    tipo: MovimientoTipo; concepto: string; monto: number
+    canal: string; categoria: string; fecha: string
+  }) => {
+    const { data: row } = await supabase
+      .from('movimientos_caja')
+      .update(changes)
+      .eq('id', id)
+      .select('*, alumna:alumnas(nombre)')
+      .single()
+    if (row) setMovimientos(prev => prev.map(m => m.id === id ? row as MovRow : m))
+    setEditModal(null)
+  }
+
   const handleDelete = async (id: string) => {
     await supabase.from('movimientos_caja').delete().eq('id', id)
     setMovimientos(prev => prev.filter(m => m.id !== id))
@@ -246,7 +261,7 @@ export default function CajaPage() {
                   <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Categoría</th>
                   <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Canal</th>
                   <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Monto</th>
-                  <th className="px-3 py-3 w-10" />
+                  <th className="px-3 py-3 w-20" />
                 </tr>
               </thead>
               <tbody>
@@ -287,13 +302,22 @@ export default function CajaPage() {
                       {m.tipo === 'ingreso' ? '+' : '-'}${Number(m.monto).toLocaleString('es-MX')}
                     </td>
                     <td className="px-3 py-3.5">
-                      <button
-                        onClick={() => setConfirmDelete(m.id)}
-                        className="p-1.5 hover:bg-red-50 rounded-lg transition text-slate-300 hover:text-red-400"
-                        title="Eliminar registro"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setEditModal(m)}
+                          className="p-1.5 hover:bg-blue-50 rounded-lg transition text-slate-300 hover:text-blue-500"
+                          title="Editar registro"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setConfirmDelete(m.id)}
+                          className="p-1.5 hover:bg-red-50 rounded-lg transition text-slate-300 hover:text-red-400"
+                          title="Eliminar registro"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -304,6 +328,13 @@ export default function CajaPage() {
       </div>
 
       {modal && <MovimientoModal onSave={handleAdd} onClose={() => setModal(false)} />}
+      {editModal && (
+        <EditModal
+          movimiento={editModal}
+          onSave={(changes) => handleUpdate(editModal.id, changes)}
+          onClose={() => setEditModal(null)}
+        />
+      )}
 
       {/* Confirm delete dialog */}
       {confirmDelete && (
@@ -335,7 +366,150 @@ export default function CajaPage() {
   )
 }
 
-// ─── Modal ────────────────────────────────────────────────────────────────────
+// ─── Edit Modal ───────────────────────────────────────────────────────────────
+const TODAS_CATEGORIAS = [
+  { key: 'inscripcion',   label: 'Inscripción' },
+  { key: 'colegiatura',   label: 'Colegiatura' },
+  { key: 'bachillerato',  label: 'Bachillerato' },
+  { key: 'ambos',         label: 'Col. + Bachi' },
+  { key: 'uniforme',      label: 'Uniforme' },
+  { key: 'semanal',       label: 'Semanal' },
+  { key: 'rcp',           label: 'RCP' },
+  { key: 'certificado',   label: 'Certificado' },
+  { key: 'credencial',    label: 'Credencial' },
+  { key: 'informe',       label: 'Informe' },
+  { key: 'materiales',    label: 'Materiales' },
+  { key: 'renta',         label: 'Renta' },
+  { key: 'sueldos',       label: 'Sueldos' },
+  { key: 'servicios',     label: 'Servicios' },
+  { key: 'mantenimiento', label: 'Mantenimiento' },
+  { key: 'otro',          label: 'Otro' },
+  { key: 'otros',         label: 'Otros' },
+]
+
+function EditModal({ movimiento, onSave, onClose }: {
+  movimiento: MovRow
+  onSave: (changes: { tipo: MovimientoTipo; concepto: string; monto: number; canal: string; categoria: string; fecha: string }) => void
+  onClose: () => void
+}) {
+  const [tipo,      setTipo]      = useState<MovimientoTipo>(movimiento.tipo)
+  const [concepto,  setConcepto]  = useState(movimiento.concepto)
+  const [monto,     setMonto]     = useState(String(movimiento.monto))
+  const [canal,     setCanal]     = useState<string>(movimiento.canal)
+  const [categoria, setCategoria] = useState(movimiento.categoria)
+  const [fecha,     setFecha]     = useState(movimiento.fecha)
+
+  const handleSubmit = () => {
+    if (!concepto.trim() || !monto) return
+    onSave({ tipo, concepto: concepto.trim(), monto: parseFloat(monto) || 0, canal, categoria, fecha })
+  }
+
+  const CANALES = [
+    { key: 'efectivo',      label: 'Efectivo' },
+    { key: 'transferencia', label: 'Transferencia' },
+    { key: 'tarjeta',       label: 'Tarjeta' },
+    { key: 'mixto',         label: 'Mixto' },
+  ]
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-fade-in max-h-[92vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 sticky top-0 bg-white">
+          <div>
+            <h3 className="font-semibold text-slate-900">Editar movimiento</h3>
+            {movimiento.alumna && (
+              <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
+                <User className="w-3 h-3" />{movimiento.alumna.nombre}
+              </p>
+            )}
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-xl">
+            <X className="w-4 h-4 text-slate-400" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {/* Tipo */}
+          <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl">
+            <button onClick={() => setTipo('ingreso')}
+              className={`py-2 rounded-lg text-sm font-medium transition ${tipo === 'ingreso' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>
+              Ingreso
+            </button>
+            <button onClick={() => setTipo('egreso')}
+              className={`py-2 rounded-lg text-sm font-medium transition ${tipo === 'egreso' ? 'bg-white text-red-600 shadow-sm' : 'text-slate-500'}`}>
+              Gasto
+            </button>
+          </div>
+
+          {/* Concepto */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Concepto</label>
+            <input value={concepto} onChange={e => setConcepto(e.target.value)}
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+
+          {/* Monto + Fecha */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">Monto</label>
+              <div className="relative">
+                <span className="absolute left-3 top-2.5 text-slate-400 text-sm">$</span>
+                <input type="number" value={monto} onChange={e => setMonto(e.target.value)}
+                  className="w-full pl-7 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">Fecha</label>
+              <input type="date" value={fecha} onChange={e => setFecha(e.target.value)}
+                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+
+          {/* Categoría */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Categoría</label>
+            <select value={categoria} onChange={e => setCategoria(e.target.value)}
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              {TODAS_CATEGORIAS.map(c => (
+                <option key={c.key} value={c.key}>{c.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Canal */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Canal de pago</label>
+            <div className="grid grid-cols-4 gap-2">
+              {CANALES.map(c => (
+                <button key={c.key} onClick={() => setCanal(c.key)}
+                  className={`py-2 rounded-xl text-xs font-medium border transition ${
+                    canal === c.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                  }`}>
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-3 pt-1">
+            <button onClick={onClose}
+              className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition">
+              Cancelar
+            </button>
+            <button onClick={handleSubmit}
+              className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition">
+              Guardar cambios
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── New Modal ────────────────────────────────────────────────────────────────
 function MovimientoModal({ onSave, onClose }: {
   onSave: (d: {
     tipo: MovimientoTipo; concepto: string; monto: number
