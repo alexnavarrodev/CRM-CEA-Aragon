@@ -2,35 +2,43 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Alumna, PagoBachillerato, PagoEstado } from '@/lib/types'
+import { Alumna, PagoBachillerato } from '@/lib/types'
 import { Check, Plus, X, GraduationCap } from 'lucide-react'
 
-const ANIO = new Date().getFullYear()
+const TIPOS = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'] as const
+type TipoMes = typeof TIPOS[number]
 
-const COLUMNAS = [
-  { key: 'inscripcion', label: 'INSCRIPCIÓN' },
-  { key: 'materiales',  label: 'MATERIALES' },
-  { key: 'ene', label: 'ENE' },
-  { key: 'feb', label: 'FEB' },
-  { key: 'mar', label: 'MAR' },
-  { key: 'abr', label: 'ABR' },
-  { key: 'may', label: 'MAY' },
-  { key: 'jun', label: 'JUN' },
-  { key: 'jul', label: 'JUL' },
-  { key: 'ago', label: 'AGO' },
-  { key: 'sep', label: 'SEP' },
-  { key: 'oct', label: 'OCT' },
-  { key: 'nov', label: 'NOV' },
-  { key: 'dic', label: 'DIC' },
+type Columna = { anio: number; tipo: TipoMes; label: string; key: string }
+
+function generarColumnas(): Columna[] {
+  const cols: Columna[] = []
+  for (let anio = 2025; anio <= 2027; anio++) {
+    const inicio = anio === 2025 ? 10 : 0  // index 10 = 'nov', 0 = 'ene'
+    for (let i = inicio; i < 12; i++) {
+      const tipo = TIPOS[i]
+      cols.push({ anio, tipo, label: tipo.toUpperCase(), key: `${anio}-${tipo}` })
+    }
+  }
+  return cols
+}
+
+const COLUMNAS = generarColumnas()
+
+const YEAR_GROUPS = [
+  { anio: 2025, count: 2  },
+  { anio: 2026, count: 12 },
+  { anio: 2027, count: 12 },
 ]
 
 type PagoMap = Record<string, Record<string, PagoBachillerato>>
+
+const HOY = new Date()
 
 export default function BachilleratoPage() {
   const [alumnas, setAlumnas] = useState<Alumna[]>([])
   const [pagos, setPagos] = useState<PagoMap>({})
   const [busqueda, setBusqueda] = useState('')
-  const [modal, setModal] = useState<{ alumna: Alumna; tipo: string } | null>(null)
+  const [modal, setModal] = useState<{ alumna: Alumna; anio: number; tipo: TipoMes } | null>(null)
   const [loading, setLoading] = useState(true)
   const supabase = createClient()
 
@@ -39,13 +47,13 @@ export default function BachilleratoPage() {
     if (!user) return
     const [{ data: al }, { data: pg }] = await Promise.all([
       supabase.from('alumnas').select('*, grupo:grupos(*)').eq('user_id', user.id).in('programa', ['bachillerato', 'ambos']).eq('status', 'activa').order('nombre'),
-      supabase.from('pagos_bachillerato').select('*').eq('user_id', user.id).eq('anio', ANIO),
+      supabase.from('pagos_bachillerato').select('*').eq('user_id', user.id).gte('anio', 2025).lte('anio', 2027),
     ])
     setAlumnas(al ?? [])
     const map: PagoMap = {}
     ;(pg ?? []).forEach(p => {
       if (!map[p.alumna_id]) map[p.alumna_id] = {}
-      map[p.alumna_id][p.tipo] = p
+      map[p.alumna_id][`${p.anio}-${p.tipo}`] = p
     })
     setPagos(map)
     setLoading(false)
@@ -70,20 +78,30 @@ export default function BachilleratoPage() {
     if (!modal) return
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    const existing = pagos[modal.alumna.id]?.[modal.tipo]
+    const key = `${modal.anio}-${modal.tipo}`
+    const existing = pagos[modal.alumna.id]?.[key]
     let row
     if (existing) {
-      const { data } = await supabase.from('pagos_bachillerato').update({ monto, estado, fecha_pago: estado === 'pagado' ? new Date().toISOString().slice(0, 10) : null }).eq('id', existing.id).select().single()
+      const { data } = await supabase.from('pagos_bachillerato')
+        .update({ monto, estado, fecha_pago: estado === 'pagado' ? new Date().toISOString().slice(0, 10) : null })
+        .eq('id', existing.id).select().single()
       row = data
     } else {
-      const { data } = await supabase.from('pagos_bachillerato').insert({ user_id: user.id, alumna_id: modal.alumna.id, anio: ANIO, tipo: modal.tipo, monto, estado, fecha_pago: estado === 'pagado' ? new Date().toISOString().slice(0, 10) : null }).select().single()
+      const { data } = await supabase.from('pagos_bachillerato')
+        .insert({ user_id: user.id, alumna_id: modal.alumna.id, anio: modal.anio, tipo: modal.tipo, monto, estado, fecha_pago: estado === 'pagado' ? new Date().toISOString().slice(0, 10) : null })
+        .select().single()
       row = data
     }
     if (row) {
-      setPagos(prev => ({ ...prev, [modal.alumna.id]: { ...prev[modal.alumna.id], [modal.tipo]: row } }))
+      setPagos(prev => ({
+        ...prev,
+        [modal.alumna.id]: { ...prev[modal.alumna.id], [key]: row }
+      }))
     }
     setModal(null)
   }
+
+  const tipoActual = TIPOS[HOY.getMonth()]
 
   return (
     <div className="flex flex-col h-full animate-fade-in">
@@ -91,15 +109,15 @@ export default function BachilleratoPage() {
       <div className="px-6 py-5 bg-white border-b border-slate-200 flex-shrink-0">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Bachillerato {ANIO}</h1>
-            <p className="text-sm text-slate-400 mt-0.5">Plan de pagos del ciclo escolar</p>
+            <h1 className="text-2xl font-bold text-slate-900">Bachillerato</h1>
+            <p className="text-sm text-slate-400 mt-0.5">Plan de pagos Nov 2025 – Dic 2027</p>
           </div>
         </div>
 
         {/* KPI Cards */}
         <div className="grid grid-cols-4 gap-3 mb-4">
           <div className="bg-blue-50 rounded-xl p-3 border border-blue-100">
-            <p className="text-xs text-blue-600 font-medium">Cobrado del año</p>
+            <p className="text-xs text-blue-600 font-medium">Total cobrado</p>
             <p className="text-xl font-bold text-blue-700">${totalPagado.toLocaleString('es-MX')}</p>
           </div>
           <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
@@ -133,13 +151,34 @@ export default function BachilleratoPage() {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-100 bg-slate-50/60">
-                <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-52 sticky left-0 bg-slate-50/90">ALUMNA</th>
-                {COLUMNAS.map(col => (
-                  <th key={col.key} className="text-center px-2 py-3 min-w-[90px]">
-                    <div className="text-xs font-semibold text-slate-500 uppercase">{col.label}</div>
+              {/* Row 1: Year groups */}
+              <tr className="border-b border-slate-100 bg-slate-50/80">
+                <th rowSpan={2} className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-52 sticky left-0 bg-slate-50/90 border-b border-slate-100">
+                  ALUMNA
+                </th>
+                {YEAR_GROUPS.map(({ anio, count }) => (
+                  <th key={anio} colSpan={count} className="text-center py-2 text-xs font-bold text-slate-600 border-l border-slate-200">
+                    {anio}
                   </th>
                 ))}
+              </tr>
+              {/* Row 2: Month labels */}
+              <tr className="border-b border-slate-100 bg-slate-50/60">
+                {COLUMNAS.map(col => {
+                  const isCurrentMonth = col.anio === HOY.getFullYear() && col.tipo === tipoActual
+                  const isFirstOfYear = col.tipo === (col.anio === 2025 ? 'nov' : 'ene')
+                  return (
+                    <th
+                      key={col.key}
+                      className={`text-center px-2 py-2 min-w-[80px] ${isFirstOfYear ? 'border-l border-slate-200' : ''}`}
+                    >
+                      <div className={`text-xs font-semibold uppercase rounded-md px-1 py-0.5 mx-auto w-fit
+                        ${isCurrentMonth ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>
+                        {col.label}
+                      </div>
+                    </th>
+                  )
+                })}
               </tr>
             </thead>
             <tbody>
@@ -154,10 +193,10 @@ export default function BachilleratoPage() {
                   </td>
                 </tr>
               ) : (
-                alumnasFiltradas.map((alumna, idx) => {
+                alumnasFiltradas.map(alumna => {
                   const pagoAlumna = pagos[alumna.id] ?? {}
                   return (
-                    <tr key={alumna.id} className={`border-t border-slate-50 hover:bg-slate-50/40 transition`}>
+                    <tr key={alumna.id} className="border-t border-slate-50 hover:bg-slate-50/40 transition">
                       <td className="px-5 py-3 sticky left-0 bg-white">
                         <div className="font-medium text-slate-800">{alumna.nombre}</div>
                         {alumna.grupo && (
@@ -167,11 +206,12 @@ export default function BachilleratoPage() {
                       {COLUMNAS.map(col => {
                         const pago = pagoAlumna[col.key]
                         const pagado = pago?.estado === 'pagado'
+                        const isFirstOfYear = col.tipo === (col.anio === 2025 ? 'nov' : 'ene')
                         return (
-                          <td key={col.key} className="px-2 py-2 text-center">
+                          <td key={col.key} className={`px-2 py-2 text-center ${isFirstOfYear ? 'border-l border-slate-100' : ''}`}>
                             <button
-                              onClick={() => setModal({ alumna, tipo: col.key })}
-                              className="flex items-center justify-center gap-1 mx-auto rounded-lg px-2 py-1.5 min-w-[76px] transition hover:scale-105 active:scale-95"
+                              onClick={() => setModal({ alumna, anio: col.anio, tipo: col.tipo })}
+                              className="flex items-center justify-center gap-1 mx-auto rounded-lg px-2 py-1.5 min-w-[72px] transition hover:scale-105 active:scale-95"
                               style={pagado ? { background: '#2563EB' } : { background: '#F8FAFC', border: '1.5px dashed #CBD5E1' }}
                             >
                               {pagado ? (
@@ -203,8 +243,9 @@ export default function BachilleratoPage() {
       {modal && (
         <BachiModal
           alumna={modal.alumna}
+          anio={modal.anio}
           tipo={modal.tipo}
-          existing={pagos[modal.alumna.id]?.[modal.tipo]}
+          existing={pagos[modal.alumna.id]?.[`${modal.anio}-${modal.tipo}`]}
           onSave={handlePago}
           onClose={() => setModal(null)}
         />
@@ -213,12 +254,12 @@ export default function BachilleratoPage() {
   )
 }
 
-function BachiModal({ alumna, tipo, existing, onSave, onClose }: {
-  alumna: Alumna; tipo: string; existing?: PagoBachillerato
+function BachiModal({ alumna, anio, tipo, existing, onSave, onClose }: {
+  alumna: Alumna; anio: number; tipo: string; existing?: PagoBachillerato
   onSave: (monto: number, estado: 'pagado' | 'pendiente') => void; onClose: () => void
 }) {
   const [monto, setMonto] = useState(existing?.monto?.toString() ?? '')
-  const colLabel = COLUMNAS.find(c => c.key === tipo)?.label ?? tipo.toUpperCase()
+  const label = tipo.toUpperCase()
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
@@ -226,7 +267,7 @@ function BachiModal({ alumna, tipo, existing, onSave, onClose }: {
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <div>
             <h3 className="font-semibold text-slate-900">Registrar pago</h3>
-            <p className="text-xs text-slate-400">{alumna.nombre} · {colLabel}</p>
+            <p className="text-xs text-slate-400">{alumna.nombre} · {label} {anio}</p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-xl"><X className="w-4 h-4 text-slate-400" /></button>
         </div>
