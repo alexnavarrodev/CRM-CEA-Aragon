@@ -208,12 +208,33 @@ export default function ColegiatutasPage() {
               ) : alumnasFiltradas.length === 0 ? (
                 <tr><td colSpan={COLUMNAS.length + 1} className="text-center py-16 text-slate-400">No hay alumnas en este grupo</td></tr>
               ) : (
-                alumnasFiltradas.map((alumna, idx) => {
-                  const g = alumna.grupo
-                  const c = g ? (DIA_COLORS[g.dia] || { bg: '#3B82F6' }) : { bg: '#94A3B8' }
-                  return (
-                    <tr key={alumna.id}
-                      className={`hover:bg-slate-50/40 transition ${idx === 0 || alumnasFiltradas[idx - 1].grupo_id !== alumna.grupo_id ? 'border-t-2 border-slate-100' : 'border-t border-slate-50'}`}>
+                (() => {
+                  const DIA_ORDER = ['MAR','MIE','JUE','VIE','SAB','DOM']
+                  type GrupoGroup = { id: string; nombre: string; dia: string; alumnas: Alumna[] }
+                  const map = new Map<string, GrupoGroup>()
+                  const sinGrupo: Alumna[] = []
+                  alumnasFiltradas.forEach(alumna => {
+                    if (alumna.grupo_id && alumna.grupo) {
+                      if (!map.has(alumna.grupo_id))
+                        map.set(alumna.grupo_id, { id: alumna.grupo_id, nombre: (alumna.grupo as Grupo).nombre, dia: (alumna.grupo as Grupo).dia, alumnas: [] })
+                      map.get(alumna.grupo_id)!.alumnas.push(alumna)
+                    } else sinGrupo.push(alumna)
+                  })
+                  const grupos = Array.from(map.values()).sort((a, b) =>
+                    (DIA_ORDER.indexOf(a.dia) + 99) % 99 - (DIA_ORDER.indexOf(b.dia) + 99) % 99
+                  )
+                  if (sinGrupo.length > 0) grupos.push({ id: 'sin-grupo', nombre: 'Sin grupo', dia: '', alumnas: sinGrupo })
+
+                  return grupos.flatMap(grupo => [
+                    <tr key={`gh-${grupo.id}`}>
+                      <td colSpan={COLUMNAS.length + 1}
+                        className="px-5 py-1.5 text-xs font-bold uppercase tracking-widest text-white sticky left-0"
+                        style={{ backgroundColor: DIA_COLORS[grupo.dia]?.bg ?? '#64748B' }}>
+                        {grupo.nombre}
+                      </td>
+                    </tr>,
+                    ...grupo.alumnas.map(alumna => (
+                    <tr key={alumna.id} className="border-t border-slate-50 hover:bg-slate-50/40 transition">
                       <td className="px-5 py-2.5 sticky left-0 bg-white border-r border-slate-100">
                         <div className="font-medium text-slate-800 text-sm">{alumna.nombre}</div>
                         <div className="text-xs text-slate-400">${Number(alumna.cuota_mensual).toLocaleString('es-MX')}/mes</div>
@@ -253,8 +274,8 @@ export default function ColegiatutasPage() {
                         )
                       })}
                     </tr>
-                  )
-                })
+                  ))])
+                })()
               )}
             </tbody>
           </table>

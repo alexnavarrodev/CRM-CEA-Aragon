@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Alumna, PagoBachillerato } from '@/lib/types'
+import { Alumna, Grupo, PagoBachillerato, DIA_COLORS } from '@/lib/types'
 import { Check, Plus, X, GraduationCap } from 'lucide-react'
 
 const TIPOS = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'] as const
@@ -193,15 +193,37 @@ export default function BachilleratoPage() {
                   </td>
                 </tr>
               ) : (
-                alumnasFiltradas.map(alumna => {
+                (() => {
+                  const DIA_ORDER = ['MAR','MIE','JUE','VIE','SAB','DOM']
+                  type GrupoGroup = { id: string; nombre: string; dia: string; alumnas: Alumna[] }
+                  const map = new Map<string, GrupoGroup>()
+                  const sinGrupo: Alumna[] = []
+                  alumnasFiltradas.forEach(alumna => {
+                    if (alumna.grupo_id && alumna.grupo) {
+                      if (!map.has(alumna.grupo_id))
+                        map.set(alumna.grupo_id, { id: alumna.grupo_id, nombre: (alumna.grupo as Grupo).nombre, dia: (alumna.grupo as Grupo).dia, alumnas: [] })
+                      map.get(alumna.grupo_id)!.alumnas.push(alumna)
+                    } else sinGrupo.push(alumna)
+                  })
+                  const grupos = Array.from(map.values()).sort((a, b) =>
+                    (DIA_ORDER.indexOf(a.dia) + 99) % 99 - (DIA_ORDER.indexOf(b.dia) + 99) % 99
+                  )
+                  if (sinGrupo.length > 0) grupos.push({ id: 'sin-grupo', nombre: 'Sin grupo', dia: '', alumnas: sinGrupo })
+
+                  return grupos.flatMap(grupo => [
+                    <tr key={`gh-${grupo.id}`}>
+                      <td colSpan={COLUMNAS.length + 1}
+                        className="px-5 py-1.5 text-xs font-bold uppercase tracking-widest text-white sticky left-0"
+                        style={{ backgroundColor: DIA_COLORS[grupo.dia]?.bg ?? '#64748B' }}>
+                        {grupo.nombre}
+                      </td>
+                    </tr>,
+                    ...grupo.alumnas.map(alumna => {
                   const pagoAlumna = pagos[alumna.id] ?? {}
                   return (
                     <tr key={alumna.id} className="border-t border-slate-50 hover:bg-slate-50/40 transition">
                       <td className="px-5 py-3 sticky left-0 bg-white">
                         <div className="font-medium text-slate-800">{alumna.nombre}</div>
-                        {alumna.grupo && (
-                          <div className="text-xs text-slate-400">{alumna.grupo.nombre}</div>
-                        )}
                       </td>
                       {COLUMNAS.map(col => {
                         const pago = pagoAlumna[col.key]
@@ -232,7 +254,8 @@ export default function BachilleratoPage() {
                       })}
                     </tr>
                   )
-                })
+                })])
+                })()
               )}
             </tbody>
           </table>
