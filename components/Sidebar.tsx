@@ -40,15 +40,17 @@ const nav = [
 interface SidebarProps {
   userEmail?: string
   userName?: string
+  onClose?: () => void
 }
 
-export default function Sidebar({ userEmail, userName }: SidebarProps) {
+export default function Sidebar({ userEmail, userName, onClose }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
 
   const handleLogout = async () => {
     const supabase = createClient()
     await supabase.auth.signOut()
+    onClose?.()
     router.push('/login')
     router.refresh()
   }
@@ -97,6 +99,7 @@ export default function Sidebar({ userEmail, userName }: SidebarProps) {
                 <Link
                   key={href}
                   href={href}
+                  onClick={onClose}
                   className={`flex items-center gap-3 px-3 py-2 rounded-lg mb-0.5 transition-all text-sm font-medium ${
                     isActive
                       ? 'text-white'

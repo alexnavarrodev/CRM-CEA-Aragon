@@ -217,8 +217,8 @@ export default function VozPage() {
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col">
-      {/* Header */}
-      <div className="px-5 pt-6 pb-4 flex items-center gap-3 border-b border-white/8">
+      {/* Title — solo visible en desktop (en móvil el layout ya tiene top bar) */}
+      <div className="hidden lg:flex px-5 pt-6 pb-4 items-center gap-3 border-b border-white/8">
         <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-sm text-white flex-shrink-0">
           FN
         </div>
