@@ -8,7 +8,7 @@ Extrae la información y devuelve SOLO un objeto JSON con exactamente estos camp
   "concepto": string,
   "monto": number,
   "canal": "efectivo" | "transferencia" | "tarjeta",
-  "categoria": "inscripcion" | "colegiatura" | "bachillerato" | "materiales" | "otros",
+  "categoria": "inscripcion" | "colegiatura" | "bachillerato" | "ambos" | "materiales" | "otros",
   "alumna_nombre": string | null
 }
 
@@ -19,7 +19,14 @@ Reglas:
 - alumna_nombre: extrae el nombre de la alumna si se menciona, de lo contrario null.
 - concepto: descripción corta y clara del movimiento (máx 60 caracteres).
 - monto: solo el número, sin símbolos de moneda.
-- categoria: elige la más apropiada. "colegiatura" para mensualidades de colegiatura, "bachillerato" para pagos de bachillerato, "inscripcion" para inscripciones.
+- categoria:
+  * "ambos" cuando se mencionan AMBOS programas juntos (ej: "colegiatura y bachillerato", "col+bachi", "los dos programas", "ambos") O cuando la alumna tiene programa "ambos" y paga mensualidad completa.
+  * "colegiatura" para pagos solo de colegiatura/mensualidad de enfermería.
+  * "bachillerato" para pagos solo de bachillerato.
+  * "inscripcion" para inscripciones o pagos de registro.
+  * "materiales" para materiales, libros, uniformes.
+  * "otros" para cualquier otro concepto.
+- Si en la lista de alumnas se indica que la alumna tiene programa "(Colegiatura+Bachillerato)" y paga una mensualidad sin especificar cuál, usa "ambos".
 - Responde SOLO con el JSON válido, sin texto adicional, sin bloques de código.`
 
 export async function POST(req: NextRequest) {
@@ -45,7 +52,13 @@ export async function POST(req: NextRequest) {
 
   const alumnasList =
     alumnas.length > 0
-      ? `\n\nAlumnas registradas en el sistema (para identificar nombres):\n${alumnas.map(a => a.nombre).join(', ')}`
+      ? `\n\nAlumnas registradas en el sistema:\n${alumnas.map((a: { nombre: string; programa?: string }) => {
+          const prog = a.programa === 'ambos'        ? '(Colegiatura+Bachillerato)'
+                     : a.programa === 'colegiaturas'  ? '(Solo Colegiatura)'
+                     : a.programa === 'bachillerato'  ? '(Solo Bachillerato)'
+                     : ''
+          return `- ${a.nombre} ${prog}`.trim()
+        }).join('\n')}`
       : ''
 
   const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {

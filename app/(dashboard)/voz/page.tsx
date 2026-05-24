@@ -59,6 +59,7 @@ type EntradaParsed = {
 }
 
 const CATEGORIAS = [
+  { key: 'ambos',        label: 'Col. + Bachi' },
   { key: 'inscripcion',  label: 'Inscripción' },
   { key: 'colegiatura',  label: 'Colegiatura' },
   { key: 'bachillerato', label: 'Bachillerato' },
@@ -80,7 +81,7 @@ export default function VozPage() {
   const [interimText, setInterimText] = useState('')
   const [entrada, setEntrada] = useState<EntradaParsed | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
-  const [alumnas, setAlumnas] = useState<{ id: string; nombre: string }[]>([])
+  const [alumnas, setAlumnas] = useState<{ id: string; nombre: string; programa: string }[]>([])
   const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
 
   const recognitionRef = useRef<ISpeechRecognition | null>(null)
@@ -93,7 +94,7 @@ export default function VozPage() {
   useEffect(() => {
     supabase
       .from('alumnas')
-      .select('id, nombre')
+      .select('id, nombre, programa')
       .eq('status', 'activa')
       .then(({ data }) => { if (data) setAlumnas(data) })
   // eslint-disable-next-line react-hooks/exhaustive-deps

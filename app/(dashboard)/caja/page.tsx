@@ -3,54 +3,85 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Alumna, MovimientoCaja, MovimientoTipo, Canal, MESES } from '@/lib/types'
-import { Plus, TrendingUp, TrendingDown, X, ArrowUpRight, ArrowDownRight, User, Trash2, Pencil } from 'lucide-react'
+import {
+  Plus, TrendingUp, TrendingDown, X, ArrowUpRight, ArrowDownRight,
+  User, Trash2, Pencil, ChevronDown, ChevronUp, Tag, Check,
+} from 'lucide-react'
+
+// ─── Category helpers ────────────────────────────────────────────────────────
+export const PROTECTED_CATS = ['inscripcion', 'colegiatura', 'bachillerato', 'ambos', 'otros']
+
+export const DEFAULT_CATEGORIAS: { key: string; label: string }[] = [
+  { key: 'inscripcion',   label: 'Inscripción' },
+  { key: 'colegiatura',   label: 'Colegiatura' },
+  { key: 'bachillerato',  label: 'Bachillerato' },
+  { key: 'ambos',         label: 'Col. + Bachi' },
+  { key: 'materiales',    label: 'Materiales' },
+  { key: 'renta',         label: 'Renta' },
+  { key: 'sueldos',       label: 'Sueldos' },
+  { key: 'servicios',     label: 'Servicios' },
+  { key: 'mantenimiento', label: 'Mantenimiento' },
+  { key: 'uniforme',      label: 'Uniforme' },
+  { key: 'otros',         label: 'Otros' },
+]
+
+function loadCategorias(): { key: string; label: string }[] {
+  try {
+    const stored = localStorage.getItem('crm_categorias')
+    if (stored) return JSON.parse(stored) as { key: string; label: string }[]
+  } catch {}
+  return DEFAULT_CATEGORIAS
+}
+
+function saveCatStorage(cats: { key: string; label: string }[]) {
+  try { localStorage.setItem('crm_categorias', JSON.stringify(cats)) } catch {}
+}
 
 // ─── Labels ──────────────────────────────────────────────────────────────────
-const CATEGORIA_LABELS: Record<string, string> = {
-  inscripcion:   'Inscripción',
-  colegiatura:   'Colegiatura',
-  bachillerato:  'Bachillerato',
-  ambos:         'Col. + Bachi',
-  materiales:    'Materiales',
-  otros:         'Otros',
-  renta:         'Renta',
-  sueldos:       'Sueldos',
-  servicios:     'Servicios',
-  mantenimiento: 'Mantenimiento',
-}
-
 const CANAL_LABELS: Record<Canal, string> = {
-  efectivo:      'Efectivo',
-  transferencia: 'Transferencia',
-  tarjeta:       'Tarjeta',
+  efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta: 'Tarjeta',
 }
 
-// Bachillerato concept keys (matches COLUMNAS in bachillerato page)
 const BACHI_CONCEPTOS = [
   { key: 'inscripcion', label: 'Inscripción' },
   { key: 'materiales',  label: 'Materiales' },
-  ...MESES.map((m, i) => ({ key: m.toLowerCase(), label: m })),
+  ...MESES.map(m => ({ key: m.toLowerCase(), label: m })),
 ]
 
-// Derive bachillerato tipo from mes number (1=ene … 12=dic)
 const mesToBachiTipo = (mes: number) => MESES[mes - 1].toLowerCase()
 
-// ─── Page ────────────────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 type MovRow = MovimientoCaja & { alumna?: { nombre: string } | null }
 
+// ─── Page ────────────────────────────────────────────────────────────────────
 export default function CajaPage() {
-  const [movimientos, setMovimientos] = useState<MovRow[]>([])
-  const [filtroTipo, setFiltroTipo] = useState<'todos' | MovimientoTipo>('todos')
-  const [filtroMes, setFiltroMes] = useState(() => {
+  const [movimientos, setMovimientos]   = useState<MovRow[]>([])
+  const [filtroTipo, setFiltroTipo]     = useState<'todos' | MovimientoTipo>('todos')
+  const [filtroCategoria, setFiltroCategoria] = useState('todos')
+  const [filtroMes, setFiltroMes]       = useState(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   })
-  const [busqueda, setBusqueda] = useState('')
-  const [modal, setModal] = useState(false)
-  const [editModal, setEditModal] = useState<MovRow | null>(null)
+  const [busqueda, setBusqueda]         = useState('')
+  const [headerOpen, setHeaderOpen]     = useState(true)
+  const [modal, setModal]               = useState(false)
+  const [editModal, setEditModal]       = useState<MovRow | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [catModal, setCatModal]         = useState(false)
+  const [loading, setLoading]           = useState(true)
+  const [categorias, setCategorias]     = useState<{ key: string; label: string }[]>(DEFAULT_CATEGORIAS)
   const supabase = createClient()
+
+  useEffect(() => { setCategorias(loadCategorias()) }, [])
+
+  const saveCategorias = useCallback((cats: { key: string; label: string }[]) => {
+    setCategorias(cats)
+    saveCatStorage(cats)
+  }, [])
+
+  const catLabel = useCallback((key: string) =>
+    categorias.find(c => c.key === key)?.label ?? key
+  , [categorias])
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -69,6 +100,7 @@ export default function CajaPage() {
 
   const filtrados = movimientos.filter(m => {
     if (filtroTipo !== 'todos' && m.tipo !== filtroTipo) return false
+    if (filtroCategoria !== 'todos' && m.categoria !== filtroCategoria) return false
     if (filtroMes) {
       const d = new Date(m.fecha)
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -80,9 +112,9 @@ export default function CajaPage() {
 
   const totalIngresos = filtrados.filter(m => m.tipo === 'ingreso').reduce((s, m) => s + Number(m.monto), 0)
   const totalGastos   = filtrados.filter(m => m.tipo === 'egreso').reduce((s, m) => s + Number(m.monto), 0)
-  const balance = totalIngresos - totalGastos
+  const balance       = totalIngresos - totalGastos
 
-  // ── Save handler: registra movimiento_caja + pagos automáticos ───────────
+  // ── Save new movement ─────────────────────────────────────────────────────
   const handleAdd = async (payload: {
     tipo: MovimientoTipo; concepto: string; monto: number
     canal: Canal; categoria: string; fecha: string
@@ -90,11 +122,9 @@ export default function CajaPage() {
   }) => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-
     const { alumna_id, mes, tipoBachi, ...movData } = payload
     const anio = new Date(payload.fecha).getFullYear()
 
-    // 1. Guardar movimiento en caja
     const { data: row } = await supabase
       .from('movimientos_caja')
       .insert({ ...movData, alumna_id: alumna_id || null, user_id: user.id })
@@ -102,7 +132,6 @@ export default function CajaPage() {
       .single()
     if (row) setMovimientos(prev => [row as MovRow, ...prev])
 
-    // 2. Registrar en pagos_colegiaturas si aplica
     const upsertCol = async (montoCol: number) => {
       if (!alumna_id || !mes) return
       const { data: ex } = await supabase
@@ -120,7 +149,6 @@ export default function CajaPage() {
       }
     }
 
-    // 3. Registrar en pagos_bachillerato si aplica
     const upsertBachi = async (montoBachi: number, tipo: string) => {
       if (!alumna_id || !tipo) return
       const { data: ex } = await supabase
@@ -143,13 +171,9 @@ export default function CajaPage() {
       if (payload.categoria === 'bachillerato') await upsertBachi(payload.monto, tipoBachi)
       if (payload.categoria === 'ambos') {
         const mitad = payload.monto / 2
-        await Promise.all([
-          upsertCol(mitad),
-          upsertBachi(mitad, mesToBachiTipo(mes)),
-        ])
+        await Promise.all([upsertCol(mitad), upsertBachi(mitad, mesToBachiTipo(mes))])
       }
     }
-
     setModal(false)
   }
 
@@ -159,10 +183,8 @@ export default function CajaPage() {
   }) => {
     const { data: row } = await supabase
       .from('movimientos_caja')
-      .update(changes)
-      .eq('id', id)
-      .select('*, alumna:alumnas(nombre)')
-      .single()
+      .update(changes).eq('id', id)
+      .select('*, alumna:alumnas(nombre)').single()
     if (row) setMovimientos(prev => prev.map(m => m.id === id ? row as MovRow : m))
     setEditModal(null)
   }
@@ -181,68 +203,119 @@ export default function CajaPage() {
     return { key, label }
   })
 
+  // Categories used in current movimientos (all time) for "in use" detection
+  const catsEnUso = [...new Set(movimientos.map(m => m.categoria))]
+
+  const catBadgeColor = (cat: string) =>
+    cat === 'ambos'       ? 'bg-violet-50 text-violet-700' :
+    cat === 'colegiatura' ? 'bg-blue-50 text-blue-700' :
+    cat === 'bachillerato'? 'bg-emerald-50 text-emerald-700' :
+    cat === 'renta' || cat === 'sueldos' || cat === 'servicios' || cat === 'mantenimiento'
+                          ? 'bg-orange-50 text-orange-700' :
+                            'bg-slate-100 text-slate-600'
+
   return (
     <div className="flex flex-col h-full animate-fade-in">
-      {/* Header */}
-      <div className="px-6 py-5 bg-white border-b border-slate-200 flex-shrink-0">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Caja</h1>
-            <p className="text-sm text-slate-400 mt-0.5">Control de ingresos y gastos</p>
+      {/* ── Header ─────────────────────────────────────────────────────── */}
+      <div className="px-4 md:px-6 py-4 bg-white border-b border-slate-200 flex-shrink-0">
+        {/* Title row */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setHeaderOpen(o => !o)}
+              className="p-1 rounded-lg hover:bg-slate-100 transition text-slate-400"
+              title={headerOpen ? 'Colapsar' : 'Expandir'}
+            >
+              {headerOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+            <div>
+              <h1 className="text-xl md:text-2xl font-bold text-slate-900">Caja</h1>
+              {headerOpen && <p className="text-xs text-slate-400">Control de ingresos y gastos</p>}
+            </div>
           </div>
           <button onClick={() => setModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition shadow-sm">
-            <Plus className="w-4 h-4" /> Nuevo movimiento
+            className="flex items-center gap-1.5 px-3 md:px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition shadow-sm">
+            <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">Nuevo movimiento</span>
+            <span className="sm:hidden">Nuevo</span>
           </button>
         </div>
 
-        {/* KPIs */}
-        <div className="grid grid-cols-3 gap-3 mb-4">
-          <div className="bg-blue-50 rounded-xl p-3 border border-blue-100">
-            <div className="flex items-center gap-1.5 mb-1">
-              <TrendingUp className="w-3.5 h-3.5 text-blue-500" />
-              <p className="text-xs text-blue-600 font-medium">Ingresos</p>
+        {headerOpen && (
+          <>
+            {/* KPIs */}
+            <div className="grid grid-cols-3 gap-2 md:gap-3 mb-3">
+              <div className="bg-blue-50 rounded-xl p-2.5 md:p-3 border border-blue-100">
+                <div className="flex items-center gap-1 mb-0.5">
+                  <TrendingUp className="w-3 h-3 text-blue-500 flex-shrink-0" />
+                  <p className="text-[10px] md:text-xs text-blue-600 font-medium truncate">Ingresos</p>
+                </div>
+                <p className="text-base md:text-xl font-bold text-blue-700 truncate">${totalIngresos.toLocaleString('es-MX')}</p>
+              </div>
+              <div className="bg-red-50 rounded-xl p-2.5 md:p-3 border border-red-100">
+                <div className="flex items-center gap-1 mb-0.5">
+                  <TrendingDown className="w-3 h-3 text-red-500 flex-shrink-0" />
+                  <p className="text-[10px] md:text-xs text-red-600 font-medium truncate">Gastos</p>
+                </div>
+                <p className="text-base md:text-xl font-bold text-red-600 truncate">${totalGastos.toLocaleString('es-MX')}</p>
+              </div>
+              <div className={`rounded-xl p-2.5 md:p-3 border ${balance >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
+                <p className={`text-[10px] md:text-xs font-medium mb-0.5 ${balance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>Balance</p>
+                <p className={`text-base md:text-xl font-bold truncate ${balance >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>${balance.toLocaleString('es-MX')}</p>
+              </div>
             </div>
-            <p className="text-xl font-bold text-blue-700">${totalIngresos.toLocaleString('es-MX')}</p>
-          </div>
-          <div className="bg-red-50 rounded-xl p-3 border border-red-100">
-            <div className="flex items-center gap-1.5 mb-1">
-              <TrendingDown className="w-3.5 h-3.5 text-red-500" />
-              <p className="text-xs text-red-600 font-medium">Gastos</p>
-            </div>
-            <p className="text-xl font-bold text-red-600">${totalGastos.toLocaleString('es-MX')}</p>
-          </div>
-          <div className={`rounded-xl p-3 border ${balance >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
-            <p className={`text-xs font-medium mb-1 ${balance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>Balance</p>
-            <p className={`text-xl font-bold ${balance >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>${balance.toLocaleString('es-MX')}</p>
-          </div>
-        </div>
 
-        {/* Filters */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <select value={filtroMes} onChange={e => setFiltroMes(e.target.value)}
-            className="border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-            {mesesOpciones.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
-          </select>
-          {(['todos', 'ingreso', 'egreso'] as const).map(t => (
-            <button key={t} onClick={() => setFiltroTipo(t)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium border transition ${filtroTipo === t ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
-              {t === 'todos' ? 'Todos' : t === 'ingreso' ? 'Ingresos' : 'Gastos'}
-            </button>
-          ))}
-          <div className="relative ml-auto">
-            <input value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar concepto..."
-              className="pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white w-52" />
-            <svg className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-          </div>
-        </div>
+            {/* Filters */}
+            <div className="flex flex-wrap items-center gap-2">
+              <select value={filtroMes} onChange={e => setFiltroMes(e.target.value)}
+                className="border border-slate-200 rounded-xl px-3 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {mesesOpciones.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+              </select>
+
+              {/* Tipo */}
+              <div className="flex items-center gap-1">
+                {(['todos', 'ingreso', 'egreso'] as const).map(t => (
+                  <button key={t} onClick={() => setFiltroTipo(t)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${filtroTipo === t ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
+                    {t === 'todos' ? 'Todos' : t === 'ingreso' ? 'Ingresos' : 'Gastos'}
+                  </button>
+                ))}
+              </div>
+
+              {/* Categoria filter */}
+              <select value={filtroCategoria} onChange={e => setFiltroCategoria(e.target.value)}
+                className="border border-slate-200 rounded-xl px-3 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="todos">Todas las categorías</option>
+                {categorias.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+              </select>
+
+              {/* Manage categories */}
+              <button
+                onClick={() => setCatModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs font-medium hover:border-slate-300 hover:bg-slate-50 transition"
+                title="Gestionar categorías"
+              >
+                <Tag className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Categorías</span>
+              </button>
+
+              {/* Search */}
+              <div className="relative flex-1 min-w-[140px]">
+                <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
+                  placeholder="Buscar concepto..."
+                  className="pl-8 pr-3 py-1.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white w-full" />
+                <svg className="absolute left-2.5 top-2 w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Table */}
-      <div className="flex-1 overflow-auto p-6">
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* ── Table ──────────────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-auto p-4 md:p-6">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
           {loading ? (
             <div className="text-center py-16 text-slate-400">Cargando...</div>
           ) : filtrados.length === 0 ? (
@@ -253,102 +326,108 @@ export default function CajaPage() {
               </button>
             </div>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-100 bg-slate-50/60">
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Fecha</th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Concepto / Alumna</th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Categoría</th>
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Canal</th>
-                  <th className="text-right px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Monto</th>
-                  <th className="px-3 py-3 w-20" />
-                </tr>
-              </thead>
-              <tbody>
-                {filtrados.map(m => (
-                  <tr key={m.id} className="border-t border-slate-50 hover:bg-slate-50/40 transition">
-                    <td className="px-5 py-3.5 text-slate-500 text-xs whitespace-nowrap">
-                      {new Date(m.fecha + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-2">
-                        <span className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${m.tipo === 'ingreso' ? 'bg-blue-50' : 'bg-red-50'}`}>
-                          {m.tipo === 'ingreso'
-                            ? <ArrowUpRight className="w-3.5 h-3.5 text-blue-500" />
-                            : <ArrowDownRight className="w-3.5 h-3.5 text-red-500" />}
-                        </span>
-                        <div>
-                          <p className="font-medium text-slate-800 leading-tight">{m.concepto}</p>
-                          {m.alumna && (
-                            <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
-                              <User className="w-3 h-3" />{m.alumna.nombre}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${
-                        m.categoria === 'ambos' ? 'bg-violet-50 text-violet-700' :
-                        m.categoria === 'colegiatura' ? 'bg-blue-50 text-blue-700' :
-                        m.categoria === 'bachillerato' ? 'bg-emerald-50 text-emerald-700' :
-                        'bg-slate-100 text-slate-600'
-                      }`}>
-                        {CATEGORIA_LABELS[m.categoria] ?? m.categoria}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3.5 text-slate-500 text-xs">{CANAL_LABELS[m.canal as Canal] ?? m.canal}</td>
-                    <td className={`px-5 py-3.5 text-right font-semibold ${m.tipo === 'ingreso' ? 'text-blue-600' : 'text-red-500'}`}>
-                      {m.tipo === 'ingreso' ? '+' : '-'}${Number(m.monto).toLocaleString('es-MX')}
-                    </td>
-                    <td className="px-3 py-3.5">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => setEditModal(m)}
-                          className="p-1.5 hover:bg-blue-50 rounded-lg transition text-slate-300 hover:text-blue-500"
-                          title="Editar registro"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => setConfirmDelete(m.id)}
-                          className="p-1.5 hover:bg-red-50 rounded-lg transition text-slate-300 hover:text-red-400"
-                          title="Eliminar registro"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50/60">
+                    <th className="text-left px-4 md:px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">Fecha</th>
+                    <th className="text-left px-4 md:px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Concepto / Alumna</th>
+                    <th className="text-left px-4 md:px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">Categoría</th>
+                    <th className="text-left px-4 md:px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">Canal</th>
+                    <th className="text-right px-4 md:px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">Monto</th>
+                    <th className="px-3 py-3 w-16" />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {filtrados.map(m => (
+                    <tr key={m.id} className="border-t border-slate-50 hover:bg-slate-50/40 transition">
+                      <td className="px-4 md:px-5 py-3.5 text-slate-500 text-xs whitespace-nowrap">
+                        {new Date(m.fecha + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </td>
+                      <td className="px-4 md:px-5 py-3.5 min-w-[180px]">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${m.tipo === 'ingreso' ? 'bg-blue-50' : 'bg-red-50'}`}>
+                            {m.tipo === 'ingreso'
+                              ? <ArrowUpRight className="w-3.5 h-3.5 text-blue-500" />
+                              : <ArrowDownRight className="w-3.5 h-3.5 text-red-500" />}
+                          </span>
+                          <div>
+                            <p className="font-medium text-slate-800 leading-tight">{m.concepto}</p>
+                            {m.alumna && (
+                              <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
+                                <User className="w-3 h-3 flex-shrink-0" />{m.alumna.nombre}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 md:px-5 py-3.5 whitespace-nowrap">
+                        <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${catBadgeColor(m.categoria)}`}>
+                          {catLabel(m.categoria)}
+                        </span>
+                      </td>
+                      <td className="px-4 md:px-5 py-3.5 text-slate-500 text-xs whitespace-nowrap">
+                        {CANAL_LABELS[m.canal as Canal] ?? m.canal}
+                      </td>
+                      <td className={`px-4 md:px-5 py-3.5 text-right font-semibold whitespace-nowrap ${m.tipo === 'ingreso' ? 'text-blue-600' : 'text-red-500'}`}>
+                        {m.tipo === 'ingreso' ? '+' : '-'}${Number(m.monto).toLocaleString('es-MX')}
+                      </td>
+                      <td className="px-3 py-3.5">
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => setEditModal(m)}
+                            className="p-1.5 hover:bg-blue-50 rounded-lg transition text-slate-300 hover:text-blue-500" title="Editar">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => setConfirmDelete(m.id)}
+                            className="p-1.5 hover:bg-red-50 rounded-lg transition text-slate-300 hover:text-red-400" title="Eliminar">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>
 
-      {modal && <MovimientoModal onSave={handleAdd} onClose={() => setModal(false)} />}
+      {/* ── Modals ─────────────────────────────────────────────────────── */}
+      {modal && (
+        <MovimientoModal
+          categorias={categorias}
+          onSave={handleAdd}
+          onClose={() => setModal(false)}
+        />
+      )}
       {editModal && (
         <EditModal
           movimiento={editModal}
+          categorias={categorias}
           onSave={(changes) => handleUpdate(editModal.id, changes)}
           onClose={() => setEditModal(null)}
         />
       )}
+      {catModal && (
+        <CategoriaModal
+          categorias={categorias}
+          catsEnUso={catsEnUso}
+          onSave={saveCategorias}
+          onClose={() => setCatModal(false)}
+        />
+      )}
 
-      {/* Confirm delete dialog */}
+      {/* Confirm delete */}
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
           onClick={() => setConfirmDelete(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs mx-4 animate-fade-in p-6"
-            onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-center w-12 h-12 bg-red-50 rounded-full mx-auto mb-4">
               <Trash2 className="w-5 h-5 text-red-500" />
             </div>
             <h3 className="text-center font-semibold text-slate-900 mb-1">Eliminar registro</h3>
-            <p className="text-center text-sm text-slate-400 mb-6">
-              Esta acción no se puede deshacer.
-            </p>
+            <p className="text-center text-sm text-slate-400 mb-6">Esta acción no se puede deshacer.</p>
             <div className="flex gap-3">
               <button onClick={() => setConfirmDelete(null)}
                 className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition">
@@ -366,29 +445,167 @@ export default function CajaPage() {
   )
 }
 
-// ─── Edit Modal ───────────────────────────────────────────────────────────────
-const TODAS_CATEGORIAS = [
-  { key: 'inscripcion',   label: 'Inscripción' },
-  { key: 'colegiatura',   label: 'Colegiatura' },
-  { key: 'bachillerato',  label: 'Bachillerato' },
-  { key: 'ambos',         label: 'Col. + Bachi' },
-  { key: 'uniforme',      label: 'Uniforme' },
-  { key: 'semanal',       label: 'Semanal' },
-  { key: 'rcp',           label: 'RCP' },
-  { key: 'certificado',   label: 'Certificado' },
-  { key: 'credencial',    label: 'Credencial' },
-  { key: 'informe',       label: 'Informe' },
-  { key: 'materiales',    label: 'Materiales' },
-  { key: 'renta',         label: 'Renta' },
-  { key: 'sueldos',       label: 'Sueldos' },
-  { key: 'servicios',     label: 'Servicios' },
-  { key: 'mantenimiento', label: 'Mantenimiento' },
-  { key: 'otro',          label: 'Otro' },
-  { key: 'otros',         label: 'Otros' },
-]
+// ─── Category Management Modal ────────────────────────────────────────────────
+function CategoriaModal({ categorias, catsEnUso, onSave, onClose }: {
+  categorias: { key: string; label: string }[]
+  catsEnUso: string[]
+  onSave: (cats: { key: string; label: string }[]) => void
+  onClose: () => void
+}) {
+  const [cats, setCats]         = useState(categorias)
+  const [editKey, setEditKey]   = useState<string | null>(null)
+  const [editLabel, setEditLabel] = useState('')
+  const [newKey, setNewKey]     = useState('')
+  const [newLabel, setNewLabel] = useState('')
+  const [delConfirm, setDelConfirm] = useState<string | null>(null)
 
-function EditModal({ movimiento, onSave, onClose }: {
+  const startEdit = (key: string, label: string) => {
+    setEditKey(key)
+    setEditLabel(label)
+  }
+
+  const confirmEdit = (key: string) => {
+    if (!editLabel.trim()) return
+    setCats(prev => prev.map(c => c.key === key ? { ...c, label: editLabel.trim() } : c))
+    setEditKey(null)
+  }
+
+  const deletecat = (key: string) => {
+    setCats(prev => prev.filter(c => c.key !== key))
+    setDelConfirm(null)
+  }
+
+  const addCat = () => {
+    const k = newKey.trim().toLowerCase().replace(/\s+/g, '_')
+    const l = newLabel.trim()
+    if (!k || !l) return
+    if (cats.some(c => c.key === k)) return
+    setCats(prev => [...prev, { key: k, label: l }])
+    setNewKey('')
+    setNewLabel('')
+  }
+
+  const handleSave = () => {
+    onSave(cats)
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <Tag className="w-4 h-4 text-slate-400" />
+            <h3 className="font-semibold text-slate-900">Gestionar categorías</h3>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-xl">
+            <X className="w-4 h-4 text-slate-400" />
+          </button>
+        </div>
+
+        {/* List */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-1.5">
+          {cats.map(c => {
+            const isProtected = PROTECTED_CATS.includes(c.key)
+            const isInUse     = catsEnUso.includes(c.key)
+            const isEditing   = editKey === c.key
+
+            return (
+              <div key={c.key} className="flex items-center gap-2 p-2 rounded-xl hover:bg-slate-50 group">
+                {isEditing ? (
+                  <>
+                    <input
+                      autoFocus
+                      value={editLabel}
+                      onChange={e => setEditLabel(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') confirmEdit(c.key); if (e.key === 'Escape') setEditKey(null) }}
+                      className="flex-1 px-2 py-1 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button onClick={() => confirmEdit(c.key)}
+                      className="p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex-shrink-0">
+                      <Check className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => setEditKey(null)}
+                      className="p-1.5 hover:bg-slate-200 rounded-lg transition flex-shrink-0">
+                      <X className="w-3.5 h-3.5 text-slate-400" />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="flex-1 text-sm text-slate-700">{c.label}</span>
+                    <span className="text-[10px] text-slate-300 font-mono mr-1">{c.key}</span>
+                    {isInUse && (
+                      <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded mr-1">en uso</span>
+                    )}
+                    <button onClick={() => startEdit(c.key, c.label)}
+                      className="p-1.5 hover:bg-slate-200 rounded-lg transition opacity-0 group-hover:opacity-100 flex-shrink-0">
+                      <Pencil className="w-3.5 h-3.5 text-slate-400" />
+                    </button>
+                    {!isProtected ? (
+                      delConfirm === c.key ? (
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-red-600">¿Borrar?</span>
+                          <button onClick={() => deletecat(c.key)}
+                            className="p-1 bg-red-500 text-white rounded-lg hover:bg-red-600 transition">
+                            <Check className="w-3 h-3" />
+                          </button>
+                          <button onClick={() => setDelConfirm(null)}
+                            className="p-1 hover:bg-slate-200 rounded-lg transition">
+                            <X className="w-3 h-3 text-slate-400" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button onClick={() => setDelConfirm(c.key)}
+                          className="p-1.5 hover:bg-red-50 rounded-lg transition opacity-0 group-hover:opacity-100 flex-shrink-0"
+                          title={isInUse ? 'Esta categoría tiene movimientos' : 'Eliminar'}>
+                          <Trash2 className={`w-3.5 h-3.5 ${isInUse ? 'text-slate-300' : 'text-red-400'}`} />
+                        </button>
+                      )
+                    ) : (
+                      <span className="w-8 flex-shrink-0" />
+                    )}
+                  </>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Add new */}
+        <div className="px-5 pb-4 border-t border-slate-100 pt-4 space-y-2">
+          <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">Nueva categoría</p>
+          <div className="flex gap-2">
+            <input
+              value={newLabel}
+              onChange={e => setNewLabel(e.target.value)}
+              placeholder="Nombre (ej: Certificado)"
+              className="flex-1 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onKeyDown={e => { if (e.key === 'Enter') addCat() }}
+            />
+            <button onClick={addCat}
+              className="px-3 py-2 bg-slate-900 text-white rounded-xl text-sm font-medium hover:bg-slate-700 transition flex-shrink-0">
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 pb-5">
+          <button onClick={handleSave}
+            className="w-full py-3 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition">
+            Guardar cambios
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Edit Modal ───────────────────────────────────────────────────────────────
+function EditModal({ movimiento, categorias, onSave, onClose }: {
   movimiento: MovRow
+  categorias: { key: string; label: string }[]
   onSave: (changes: { tipo: MovimientoTipo; concepto: string; monto: number; canal: string; categoria: string; fecha: string }) => void
   onClose: () => void
 }) {
@@ -405,16 +622,13 @@ function EditModal({ movimiento, onSave, onClose }: {
   }
 
   const CANALES = [
-    { key: 'efectivo',      label: 'Efectivo' },
-    { key: 'transferencia', label: 'Transferencia' },
-    { key: 'tarjeta',       label: 'Tarjeta' },
-    { key: 'mixto',         label: 'Mixto' },
+    { key: 'efectivo', label: 'Efectivo' }, { key: 'transferencia', label: 'Transferencia' },
+    { key: 'tarjeta', label: 'Tarjeta' }, { key: 'mixto', label: 'Mixto' },
   ]
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-fade-in max-h-[92vh] overflow-y-auto"
-        onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 sticky top-0 bg-white">
           <div>
             <h3 className="font-semibold text-slate-900">Editar movimiento</h3>
@@ -424,13 +638,9 @@ function EditModal({ movimiento, onSave, onClose }: {
               </p>
             )}
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-xl">
-            <X className="w-4 h-4 text-slate-400" />
-          </button>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-xl"><X className="w-4 h-4 text-slate-400" /></button>
         </div>
-
         <div className="p-6 space-y-4">
-          {/* Tipo */}
           <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl">
             <button onClick={() => setTipo('ingreso')}
               className={`py-2 rounded-lg text-sm font-medium transition ${tipo === 'ingreso' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>
@@ -441,15 +651,11 @@ function EditModal({ movimiento, onSave, onClose }: {
               Gasto
             </button>
           </div>
-
-          {/* Concepto */}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">Concepto</label>
             <input value={concepto} onChange={e => setConcepto(e.target.value)}
               className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
-
-          {/* Monto + Fecha */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Monto</label>
@@ -465,43 +671,27 @@ function EditModal({ movimiento, onSave, onClose }: {
                 className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
-
-          {/* Categoría */}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">Categoría</label>
             <select value={categoria} onChange={e => setCategoria(e.target.value)}
               className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-              {TODAS_CATEGORIAS.map(c => (
-                <option key={c.key} value={c.key}>{c.label}</option>
-              ))}
+              {categorias.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
             </select>
           </div>
-
-          {/* Canal */}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">Canal de pago</label>
             <div className="grid grid-cols-4 gap-2">
               {CANALES.map(c => (
                 <button key={c.key} onClick={() => setCanal(c.key)}
-                  className={`py-2 rounded-xl text-xs font-medium border transition ${
-                    canal === c.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
-                  }`}>
+                  className={`py-2 rounded-xl text-xs font-medium border transition ${canal === c.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>
                   {c.label}
                 </button>
               ))}
             </div>
           </div>
-
-          {/* Actions */}
           <div className="flex gap-3 pt-1">
-            <button onClick={onClose}
-              className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition">
-              Cancelar
-            </button>
-            <button onClick={handleSubmit}
-              className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition">
-              Guardar cambios
-            </button>
+            <button onClick={onClose} className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition">Cancelar</button>
+            <button onClick={handleSubmit} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition">Guardar cambios</button>
           </div>
         </div>
       </div>
@@ -509,8 +699,9 @@ function EditModal({ movimiento, onSave, onClose }: {
   )
 }
 
-// ─── New Modal ────────────────────────────────────────────────────────────────
-function MovimientoModal({ onSave, onClose }: {
+// ─── New Movement Modal ───────────────────────────────────────────────────────
+function MovimientoModal({ categorias, onSave, onClose }: {
+  categorias: { key: string; label: string }[]
   onSave: (d: {
     tipo: MovimientoTipo; concepto: string; monto: number
     canal: Canal; categoria: string; fecha: string
@@ -519,18 +710,17 @@ function MovimientoModal({ onSave, onClose }: {
   onClose: () => void
 }) {
   const supabase = createClient()
-  const [alumnas, setAlumnas] = useState<Alumna[]>([])
-  const [alumnaId, setAlumnaId] = useState<string>('')
-  const [tipo, setTipo] = useState<MovimientoTipo>('ingreso')
+  const [alumnas, setAlumnas]     = useState<Alumna[]>([])
+  const [alumnaId, setAlumnaId]   = useState<string>('')
+  const [tipo, setTipo]           = useState<MovimientoTipo>('ingreso')
   const [categoria, setCategoria] = useState('colegiatura')
-  const [mes, setMes] = useState(new Date().getMonth() + 1) // 1-12
+  const [mes, setMes]             = useState(new Date().getMonth() + 1)
   const [tipoBachi, setTipoBachi] = useState(MESES[new Date().getMonth()].toLowerCase())
-  const [concepto, setConcepto] = useState('')
-  const [monto, setMonto] = useState('')
-  const [canal, setCanal] = useState<Canal>('efectivo')
-  const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10))
+  const [concepto, setConcepto]   = useState('')
+  const [monto, setMonto]         = useState('')
+  const [canal, setCanal]         = useState<Canal>('efectivo')
+  const [fecha, setFecha]         = useState(new Date().toISOString().slice(0, 10))
 
-  // Load alumnas
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return
@@ -539,46 +729,36 @@ function MovimientoModal({ onSave, onClose }: {
     })
   }, [])
 
-  const alumna = alumnas.find(a => a.id === alumnaId)
+  const alumna   = alumnas.find(a => a.id === alumnaId)
   const programa = alumna?.programa ?? null
 
-  // ── Categorías disponibles según alumna y tipo ───────────────────────────
   const categoriasDisponibles: { key: string; label: string }[] = (() => {
-    if (tipo === 'egreso') return [
-      { key: 'renta', label: 'Renta' }, { key: 'sueldos', label: 'Sueldos' },
-      { key: 'materiales', label: 'Materiales' }, { key: 'servicios', label: 'Servicios' },
-      { key: 'mantenimiento', label: 'Mantenimiento' }, { key: 'otros', label: 'Otros' },
-    ]
-    if (!alumna) return [
-      { key: 'inscripcion', label: 'Inscripción' }, { key: 'colegiatura', label: 'Colegiatura' },
-      { key: 'bachillerato', label: 'Bachillerato' }, { key: 'materiales', label: 'Materiales' },
-      { key: 'otros', label: 'Otros' },
-    ]
-    if (programa === 'colegiaturas')  return [{ key: 'colegiatura', label: 'Colegiatura' }, { key: 'otros', label: 'Otros' }]
-    if (programa === 'bachillerato') return [{ key: 'bachillerato', label: 'Bachillerato' }, { key: 'otros', label: 'Otros' }]
+    if (tipo === 'egreso') return categorias.filter(c =>
+      !['inscripcion','colegiatura','bachillerato','ambos'].includes(c.key)
+    )
+    if (!alumna) return categorias
+    if (programa === 'colegiaturas')  return [{ key: 'colegiatura', label: 'Colegiatura' }, ...categorias.filter(c => !['inscripcion','colegiatura','bachillerato','ambos'].includes(c.key))]
+    if (programa === 'bachillerato') return [{ key: 'bachillerato', label: 'Bachillerato' }, ...categorias.filter(c => !['inscripcion','colegiatura','bachillerato','ambos'].includes(c.key))]
     if (programa === 'ambos')        return [
       { key: 'ambos', label: 'Col. + Bachi ($÷2)' },
       { key: 'colegiatura', label: 'Solo Colegiatura' },
       { key: 'bachillerato', label: 'Solo Bachillerato' },
-      { key: 'otros', label: 'Otros' },
+      ...categorias.filter(c => !['inscripcion','colegiatura','bachillerato','ambos'].includes(c.key)),
     ]
-    return [{ key: 'otros', label: 'Otros' }]
+    return categorias
   })()
 
-  // ── Auto-reset categoría cuando cambia alumna o tipo ────────────────────
   useEffect(() => {
     const primera = categoriasDisponibles[0]?.key ?? 'otros'
     setCategoria(primera)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alumnaId, tipo])
 
-  // ── Mostrar campos contextuales ──────────────────────────────────────────
   const showMes      = tipo === 'ingreso' && (categoria === 'colegiatura' || categoria === 'ambos')
   const showBachiCol = tipo === 'ingreso' && categoria === 'bachillerato'
   const isAmbos      = categoria === 'ambos'
   const montoNum     = parseFloat(monto) || 0
-  const mitad        = montoNum / 2
 
-  // ── Auto-fill concepto ───────────────────────────────────────────────────
   useEffect(() => {
     if (!alumna) return
     const mesLabel = MESES[mes - 1]
@@ -588,6 +768,7 @@ function MovimientoModal({ onSave, onClose }: {
       setConcepto(`Bachillerato ${alumna.nombre} — ${bc?.label ?? tipoBachi}`)
     }
     if (categoria === 'ambos') setConcepto(`Col.+Bachi ${alumna.nombre} — ${mesLabel}`)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alumna?.id, categoria, mes, tipoBachi])
 
   const handleSubmit = () => {
@@ -597,14 +778,12 @@ function MovimientoModal({ onSave, onClose }: {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-fade-in max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 sticky top-0 bg-white">
           <h3 className="font-semibold text-slate-900">Nuevo movimiento</h3>
           <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-xl"><X className="w-4 h-4 text-slate-400" /></button>
         </div>
-
         <div className="p-6 space-y-4">
-          {/* Tipo */}
           <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl">
             <button onClick={() => setTipo('ingreso')}
               className={`py-2 rounded-lg text-sm font-medium transition ${tipo === 'ingreso' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>
@@ -616,7 +795,6 @@ function MovimientoModal({ onSave, onClose }: {
             </button>
           </div>
 
-          {/* Alumna (solo ingresos) */}
           {tipo === 'ingreso' && (
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Alumna</label>
@@ -624,9 +802,7 @@ function MovimientoModal({ onSave, onClose }: {
                 className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
                 <option value="">— Sin alumna / otro concepto —</option>
                 {alumnas.map(a => (
-                  <option key={a.id} value={a.id}>
-                    {a.nombre}{a.programa === 'ambos' ? ' ★' : ''}
-                  </option>
+                  <option key={a.id} value={a.id}>{a.nombre}{a.programa === 'ambos' ? ' ★' : ''}</option>
                 ))}
               </select>
               {alumna && (
@@ -638,7 +814,6 @@ function MovimientoModal({ onSave, onClose }: {
             </div>
           )}
 
-          {/* Categoría */}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">Categoría</label>
             <div className="flex flex-wrap gap-2">
@@ -646,9 +821,9 @@ function MovimientoModal({ onSave, onClose }: {
                 <button key={c.key} onClick={() => setCategoria(c.key)}
                   className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
                     categoria === c.key
-                      ? c.key === 'ambos'       ? 'bg-violet-600 text-white border-violet-600'
-                      : c.key === 'colegiatura' ? 'bg-blue-600 text-white border-blue-600'
-                      : c.key === 'bachillerato'? 'bg-emerald-600 text-white border-emerald-600'
+                      ? c.key === 'ambos'        ? 'bg-violet-600 text-white border-violet-600'
+                      : c.key === 'colegiatura'  ? 'bg-blue-600 text-white border-blue-600'
+                      : c.key === 'bachillerato' ? 'bg-emerald-600 text-white border-emerald-600'
                       : 'bg-slate-800 text-white border-slate-800'
                       : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
                   }`}>
@@ -658,7 +833,6 @@ function MovimientoModal({ onSave, onClose }: {
             </div>
           </div>
 
-          {/* Mes (colegiaturas / ambos) */}
           {showMes && (
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Mes</label>
@@ -675,7 +849,6 @@ function MovimientoModal({ onSave, onClose }: {
             </div>
           )}
 
-          {/* Concepto bachillerato */}
           {showBachiCol && (
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Concepto bachillerato</label>
@@ -686,7 +859,6 @@ function MovimientoModal({ onSave, onClose }: {
             </div>
           )}
 
-          {/* Concepto */}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">Concepto</label>
             <input value={concepto} onChange={e => setConcepto(e.target.value)}
@@ -694,7 +866,6 @@ function MovimientoModal({ onSave, onClose }: {
               className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
 
-          {/* Monto + split preview */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Monto</label>
@@ -711,22 +882,20 @@ function MovimientoModal({ onSave, onClose }: {
             </div>
           </div>
 
-          {/* Ambos split preview */}
           {isAmbos && montoNum > 0 && (
             <div className="rounded-xl bg-violet-50 border border-violet-100 p-3 text-sm">
               <p className="text-violet-700 font-medium mb-1.5">División automática</p>
               <div className="flex justify-between text-violet-600 text-xs">
                 <span>Colegiatura ({MESES[mes - 1]})</span>
-                <span className="font-semibold">${mitad.toLocaleString('es-MX')}</span>
+                <span className="font-semibold">${(montoNum / 2).toLocaleString('es-MX')}</span>
               </div>
               <div className="flex justify-between text-violet-600 text-xs mt-1">
                 <span>Bachillerato ({MESES[mes - 1]})</span>
-                <span className="font-semibold">${mitad.toLocaleString('es-MX')}</span>
+                <span className="font-semibold">${(montoNum / 2).toLocaleString('es-MX')}</span>
               </div>
             </div>
           )}
 
-          {/* Canal */}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">Canal de pago</label>
             <div className="grid grid-cols-3 gap-2">
@@ -741,16 +910,13 @@ function MovimientoModal({ onSave, onClose }: {
             </div>
           </div>
 
-          {/* Actions */}
           <div className="flex gap-3 pt-1">
             <button onClick={onClose}
               className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition">
               Cancelar
             </button>
             <button onClick={handleSubmit}
-              className={`flex-1 py-2.5 text-white rounded-xl text-sm font-medium transition ${
-                tipo === 'ingreso' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-red-500 hover:bg-red-600'
-              }`}>
+              className={`flex-1 py-2.5 text-white rounded-xl text-sm font-medium transition ${tipo === 'ingreso' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-red-500 hover:bg-red-600'}`}>
               Guardar
             </button>
           </div>
