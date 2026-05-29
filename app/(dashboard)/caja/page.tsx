@@ -102,9 +102,8 @@ export default function CajaPage() {
     if (filtroTipo !== 'todos' && m.tipo !== filtroTipo) return false
     if (filtroCategoria !== 'todos' && m.categoria !== filtroCategoria) return false
     if (filtroMes) {
-      const d = new Date(m.fecha)
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-      if (key !== filtroMes) return false
+      // Comparación directa de string 'YYYY-MM' — evita problema UTC con new Date('YYYY-MM-DD')
+      if (m.fecha.slice(0, 7) !== filtroMes) return false
     }
     if (busqueda && !m.concepto.toLowerCase().includes(busqueda.toLowerCase())) return false
     return true
