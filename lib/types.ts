@@ -68,7 +68,7 @@ export interface PagoBachillerato {
   anio: number
   tipo: string // inscripcion | materiales | ene | feb | ... | dic
   monto: number
-  estado: 'pagado' | 'pendiente'
+  estado: 'pagado' | 'parcial' | 'pendiente'
   fecha_pago: string | null
   created_at: string
 }

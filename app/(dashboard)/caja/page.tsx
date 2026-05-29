@@ -13,7 +13,7 @@ export const PROTECTED_CATS = ['inscripcion', 'colegiatura', 'bachillerato', 'am
 
 export const DEFAULT_CATEGORIAS: { key: string; label: string }[] = [
   { key: 'inscripcion',   label: 'Inscripción' },
-  { key: 'colegiatura',   label: 'Colegiatura' },
+  { key: 'colegiatura',   label: 'Colegiatura' },  // singular — no 'Colegiaturas'
   { key: 'bachillerato',  label: 'Bachillerato' },
   { key: 'ambos',         label: 'Col. + Bachi' },
   { key: 'materiales',    label: 'Materiales' },
@@ -112,7 +112,11 @@ export default function CajaPage() {
 
   const totalIngresos = filtrados.filter(m => m.tipo === 'ingreso').reduce((s, m) => s + Number(m.monto), 0)
   const totalGastos   = filtrados.filter(m => m.tipo === 'egreso').reduce((s, m) => s + Number(m.monto), 0)
-  const balance       = totalIngresos - totalGastos
+  // Margen excluye bachillerato (no es beneficio propio)
+  const ingresosMargen = filtrados
+    .filter(m => m.tipo === 'ingreso' && m.categoria !== 'bachillerato')
+    .reduce((s, m) => s + Number(m.monto), 0)
+  const balance = ingresosMargen - totalGastos
 
   // ── Save new movement ─────────────────────────────────────────────────────
   const handleAdd = async (payload: {
@@ -260,7 +264,9 @@ export default function CajaPage() {
                 <p className="text-base md:text-xl font-bold text-red-600 truncate">${totalGastos.toLocaleString('es-MX')}</p>
               </div>
               <div className={`rounded-xl p-2.5 md:p-3 border ${balance >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
-                <p className={`text-[10px] md:text-xs font-medium mb-0.5 ${balance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>Balance</p>
+                <p className={`text-[10px] md:text-xs font-medium mb-0.5 ${balance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  Margen <span className="font-normal opacity-60">(sin Bachi)</span>
+                </p>
                 <p className={`text-base md:text-xl font-bold truncate ${balance >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>${balance.toLocaleString('es-MX')}</p>
               </div>
             </div>

@@ -6,17 +6,20 @@ import { createClient } from '@/lib/supabase/client'
 import {
   LayoutDashboard, CreditCard, GraduationCap, Wallet,
   UserPlus, Users, UserCheck, UsersRound, BarChart2, Settings, LogOut, Search, Mic,
+  ArrowRightLeft, CalendarDays,
 } from 'lucide-react'
 
 const nav = [
   {
     section: 'OPERACIÓN',
     items: [
-      { href: '/dashboard',     label: 'Panel',        icon: LayoutDashboard },
-      { href: '/colegiaturas',  label: 'Colegiaturas', icon: CreditCard },
-      { href: '/bachillerato',  label: 'Bachillerato', icon: GraduationCap },
-      { href: '/caja',          label: 'Caja',         icon: Wallet },
-      { href: '/voz',           label: 'Caja Rápida',  icon: Mic },
+      { href: '/dashboard',       label: 'Panel',          icon: LayoutDashboard },
+      { href: '/colegiaturas',    label: 'Colegiaturas',   icon: CreditCard },
+      { href: '/bachillerato',    label: 'Bachillerato',   icon: GraduationCap },
+      { href: '/caja',            label: 'Caja',           icon: Wallet },
+      { href: '/transferencias',  label: 'Transferencias', icon: ArrowRightLeft },
+      { href: '/calendario',      label: 'Calendario',     icon: CalendarDays },
+      { href: '/voz',             label: 'Caja Rápida',    icon: Mic },
     ],
   },
   {
