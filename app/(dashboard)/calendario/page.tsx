@@ -3,14 +3,117 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Grupo, Alumna, PagoColegiatura, DIA_COLORS } from '@/lib/types'
-import { ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 
-// Weekday name → DIA_COLORS key (JS getDay: 0=Sun,1=Mon,...,6=Sat)
-const JS_DAY_TO_DIA: Record<number, string> = {
-  1: 'LUN', 2: 'MAR', 3: 'MIE', 4: 'JUE', 5: 'VIE', 6: 'SAB', 0: 'DOM',
-}
+// ─── Date helpers ─────────────────────────────────────────────────────────────
 const DIA_ORDER = ['LUN','MAR','MIE','JUE','VIE','SAB','DOM']
 
+// DIA string → JS getDay() number
+const DIA_TO_JS: Record<string, number> = {
+  LUN: 1, MAR: 2, MIE: 3, JUE: 4, VIE: 5, SAB: 6, DOM: 0,
+}
+
+// nth occurrence of a weekday in a month (1-indexed)
+function nthWeekday(year: number, month: number, weekdayJS: number, n: number): Date | null {
+  let count = 0
+  for (let d = 1; d <= 31; d++) {
+    const date = new Date(year, month - 1, d)
+    if (date.getMonth() !== month - 1) break
+    if (date.getDay() === weekdayJS) {
+      count++
+      if (count === n) return date
+    }
+  }
+  return null
+}
+
+// Which occurrence (1st,2nd,3rd…) is a date within its month?
+function occurrenceInMonth(date: Date): number {
+  const weekday = date.getDay()
+  let count = 0
+  for (let d = 1; d <= date.getDate(); d++) {
+    if (new Date(date.getFullYear(), date.getMonth(), d).getDay() === weekday) count++
+  }
+  return count
+}
+
+// Format date as DD/MM/YYYY
+function fmt(date: Date): string {
+  const d = String(date.getDate()).padStart(2, '0')
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  return `${d}/${m}/${date.getFullYear()}`
+}
+
+const MESES_CORTOS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+
+// ─── Payment schedule for a group ─────────────────────────────────────────────
+// Generates one date per month, starting from the group's start month.
+// Uses the same nth-weekday occurrence as the start date.
+interface PaymentRow {
+  year: number
+  month: number           // 1–12
+  fecha: Date
+  label: string           // "Ene 2026"
+  isLiqCert: boolean
+  isPast: boolean
+  isNext: boolean         // very next upcoming payment
+  rowIndex: number        // 0 = Inicio
+}
+
+function buildSchedule(
+  grupo: Grupo,
+  startYear: number,
+  startMonth: number,
+  today: Date,
+): PaymentRow[] {
+  const weekdayJS = DIA_TO_JS[grupo.dia] ?? 2
+  // Determine which occurrence to use: 2nd by default, or derived from start
+  const startDate = nthWeekday(startYear, startMonth, weekdayJS, 2) ?? new Date(startYear, startMonth - 1, 14)
+  const occurrence = occurrenceInMonth(startDate)
+
+  const rows: PaymentRow[] = []
+  let nextFlagSet = false
+
+  // Inicio row (index 0)
+  rows.push({
+    year: startYear, month: startMonth,
+    fecha: startDate,
+    label: `${MESES_CORTOS[startMonth - 1]} ${startYear}`,
+    isLiqCert: false,
+    isPast: startDate < today,
+    isNext: false,
+    rowIndex: 0,
+  })
+
+  // Generate rows for subsequent months through Dec 2027
+  let rowIndex = 1
+  for (let y = startYear; y <= 2027; y++) {
+    const mStart = y === startYear ? startMonth + 1 : 1
+    for (let m = mStart; m <= 12; m++) {
+      const fecha = nthWeekday(y, m, weekdayJS, occurrence) ??
+                    nthWeekday(y, m, weekdayJS, occurrence - 1) ??
+                    new Date(y, m - 1, 14)
+      const isPast = fecha < today
+      const isNext = !isPast && !nextFlagSet
+      if (isNext) nextFlagSet = true
+
+      rows.push({
+        year: y, month: m,
+        fecha,
+        label: `${MESES_CORTOS[m - 1]} ${y}`,
+        // Row 8 (0-indexed rowIndex 8) = Liq. Certificado
+        isLiqCert: rowIndex === 8,
+        isPast,
+        isNext,
+        rowIndex,
+      })
+      rowIndex++
+    }
+  }
+  return rows
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
 interface GrupoStats {
   grupo: Grupo
   total: number
@@ -23,10 +126,10 @@ export default function CalendarioPage() {
   const [alumnas, setAlumnas] = useState<Pick<Alumna, 'id' | 'nombre' | 'grupo_id'>[]>([])
   const [pagos, setPagos]     = useState<PagoColegiatura[]>([])
   const [loading, setLoading] = useState(true)
-  const [hoy]                 = useState(() => new Date())
-  const [mes, setMes]         = useState(() => new Date().getMonth() + 1)   // 1–12
+  const [mes, setMes]         = useState(() => new Date().getMonth() + 1)
   const [anio, setAnio]       = useState(() => new Date().getFullYear())
   const supabase = createClient()
+  const today = new Date(); today.setHours(0,0,0,0)
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -44,179 +147,167 @@ export default function CalendarioPage() {
 
   useEffect(() => { load() }, [load])
 
-  // Stats for current mes/anio per grupo
-  const statsForMes = useCallback((): GrupoStats[] => {
-    return grupos
-      .sort((a, b) => (DIA_ORDER.indexOf(a.dia) + 99) % 99 - (DIA_ORDER.indexOf(b.dia) + 99) % 99)
-      .map(grupo => {
-        const alumnaIds = alumnas.filter(a => a.grupo_id === grupo.id).map(a => a.id)
-        const pagosMes = pagos.filter(p => alumnaIds.includes(p.alumna_id) && p.anio === anio && p.mes === mes)
-        return {
-          grupo,
-          total:     alumnaIds.length,
-          pagadas:   pagosMes.filter(p => p.estado === 'pagado').length,
-          parciales: pagosMes.filter(p => p.estado === 'parcial').length,
-        }
-      })
-  }, [grupos, alumnas, pagos, mes, anio])
+  const sortedGrupos = [...grupos].sort(
+    (a, b) => (DIA_ORDER.indexOf(a.dia) + 99) % 99 - (DIA_ORDER.indexOf(b.dia) + 99) % 99
+  )
 
-  // Build calendar days for current month
-  const buildCalendar = () => {
-    const firstDay = new Date(anio, mes - 1, 1)
-    const lastDay  = new Date(anio, mes, 0)
-    const startDow = firstDay.getDay() // 0=Sun
-    // Adjust to Monday-first grid
-    const startOffset = startDow === 0 ? 6 : startDow - 1
-    const totalCells  = Math.ceil((startOffset + lastDay.getDate()) / 7) * 7
-    const cells: (number | null)[] = Array(totalCells).fill(null)
-    for (let d = 1; d <= lastDay.getDate(); d++) {
-      cells[startOffset + d - 1] = d
+  // Find first payment month for each group
+  function getGroupStart(grupo: Grupo): { year: number; month: number } {
+    const alumnaIds = alumnas.filter(a => a.grupo_id === grupo.id).map(a => a.id)
+    const groupPagos = pagos.filter(p => alumnaIds.includes(p.alumna_id))
+    if (groupPagos.length === 0) return { year: 2025, month: 11 }
+    const earliest = groupPagos.reduce((min, p) => {
+      const val = p.anio * 100 + p.mes
+      return val < min.val ? { val, year: p.anio, month: p.mes } : min
+    }, { val: Infinity, year: 2025, month: 11 })
+    return { year: earliest.year, month: earliest.month }
+  }
+
+  // Build all schedules
+  const schedules = sortedGrupos.map(grupo => {
+    const { year, month } = getGroupStart(grupo)
+    return { grupo, rows: buildSchedule(grupo, year, month, today) }
+  })
+
+  // Max rows across all groups
+  const maxRows = Math.max(...schedules.map(s => s.rows.length), 0)
+
+  // Summary stats for selected month
+  const statsForMes: GrupoStats[] = sortedGrupos.map(grupo => {
+    const alumnaIds = alumnas.filter(a => a.grupo_id === grupo.id).map(a => a.id)
+    const pagosMes = pagos.filter(p => alumnaIds.includes(p.alumna_id) && p.anio === anio && p.mes === mes)
+    return {
+      grupo,
+      total:     alumnaIds.length,
+      pagadas:   pagosMes.filter(p => p.estado === 'pagado').length,
+      parciales: pagosMes.filter(p => p.estado === 'parcial').length,
     }
-    return cells
-  }
-
-  const calCells = buildCalendar()
-  const stats    = statsForMes()
-
-  // Grupos that meet on a given day-of-month
-  const gruposForDay = (dayNum: number): GrupoStats[] => {
-    const date = new Date(anio, mes - 1, dayNum)
-    const dia  = JS_DAY_TO_DIA[date.getDay()]
-    return stats.filter(s => s.grupo.dia === dia)
-  }
-
-  const prevMes = () => {
-    if (mes === 1) { setMes(12); setAnio(y => y - 1) } else setMes(m => m - 1)
-  }
-  const nextMes = () => {
-    if (mes === 12) { setMes(1); setAnio(y => y + 1) } else setMes(m => m + 1)
-  }
+  })
 
   const mesLabel = new Date(anio, mes - 1, 1).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })
-  const DAYS_HDR = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom']
+
+  const prevMes = () => { if (mes === 1) { setMes(12); setAnio(y => y - 1) } else setMes(m => m - 1) }
+  const nextMes = () => { if (mes === 12) { setMes(1); setAnio(y => y + 1) } else setMes(m => m + 1) }
 
   return (
     <div className="flex flex-col h-full animate-fade-in">
       {/* Header */}
       <div className="px-4 md:px-6 py-5 bg-white border-b border-slate-200 flex-shrink-0">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-xl md:text-2xl font-bold text-slate-900">Calendario de pagos</h1>
-            <p className="text-sm text-slate-400 mt-0.5">Días de clase y estatus de cobros por grupo</p>
-          </div>
-          {/* Month nav */}
-          <div className="flex items-center gap-2 bg-slate-100 rounded-xl px-2 py-1.5">
-            <button onClick={prevMes} className="p-1 rounded-lg hover:bg-white transition text-slate-500">
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <span className="text-sm font-semibold text-slate-700 capitalize min-w-[130px] text-center">{mesLabel}</span>
-            <button onClick={nextMes} className="p-1 rounded-lg hover:bg-white transition text-slate-500">
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Group legend */}
-        <div className="flex flex-wrap gap-2">
-          {stats.map(({ grupo, total, pagadas, parciales }) => {
-            const c = DIA_COLORS[grupo.dia] ?? { bg: '#64748B', text: '#fff' }
-            const pendientes = total - pagadas - parciales
-            return (
-              <div key={grupo.id}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-sm">
-                <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: c.bg }} />
-                <span className="font-medium text-slate-700">{grupo.nombre}</span>
-                <span className="text-slate-400 text-xs">{grupo.dia}</span>
-                <span className="text-[11px] font-semibold text-blue-600">{pagadas}/{total}</span>
-                {parciales > 0 && <span className="text-[11px] font-semibold text-amber-600">{parciales}p</span>}
-                {pendientes > 0 && <span className="text-[11px] text-slate-400">{pendientes}✗</span>}
-              </div>
-            )
-          })}
-        </div>
+        <h1 className="text-xl md:text-2xl font-bold text-slate-900">Calendario de pagos</h1>
+        <p className="text-sm text-slate-400 mt-0.5">Fechas de pago por grupo — Nov 2025 a Dic 2027</p>
       </div>
 
-      {/* Calendar grid */}
-      <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="flex-1 overflow-auto p-4 md:p-6 space-y-6">
+
+        {/* ── Payment schedule table ──────────────────────────────────── */}
         {loading ? (
-          <div className="flex items-center justify-center h-48">
-            <p className="text-slate-400">Cargando...</p>
-          </div>
+          <div className="text-center py-16 text-slate-400">Cargando...</div>
+        ) : schedules.length === 0 ? (
+          <div className="text-center py-16 text-slate-400">No hay grupos configurados</div>
         ) : (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            {/* Day headers */}
-            <div className="grid grid-cols-7 border-b border-slate-100">
-              {DAYS_HDR.map(d => (
-                <div key={d} className="py-2.5 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  {d}
-                </div>
-              ))}
-            </div>
-
-            {/* Weeks */}
-            <div className="grid grid-cols-7">
-              {calCells.map((dayNum, i) => {
-                const isToday = dayNum !== null
-                  && dayNum === hoy.getDate()
-                  && mes === hoy.getMonth() + 1
-                  && anio === hoy.getFullYear()
-                const isWeekend = i % 7 >= 5
-                const grupos = dayNum !== null ? gruposForDay(dayNum) : []
-
-                return (
-                  <div
-                    key={i}
-                    className={`min-h-[90px] md:min-h-[110px] p-1.5 border-b border-r border-slate-50
-                      ${isWeekend ? 'bg-slate-50/40' : 'bg-white'}
-                      ${i % 7 === 6 ? 'border-r-0' : ''}
-                      ${i >= calCells.length - 7 ? 'border-b-0' : ''}
-                    `}
-                  >
-                    {dayNum !== null && (
-                      <>
-                        {/* Day number */}
-                        <div className={`w-7 h-7 flex items-center justify-center rounded-full text-sm font-medium mb-1 ${
-                          isToday ? 'bg-blue-600 text-white' : 'text-slate-700'
-                        }`}>
-                          {dayNum}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+            <table className="text-sm border-collapse" style={{ minWidth: `${100 + schedules.length * 130}px` }}>
+              <thead>
+                <tr>
+                  {/* Empty top-left cell */}
+                  <th className="sticky left-0 bg-white z-10 w-24 border-b border-slate-200" />
+                  {schedules.map(({ grupo }) => {
+                    const c = DIA_COLORS[grupo.dia] ?? { bg: '#64748B', text: '#fff' }
+                    return (
+                      <th key={grupo.id} className="border-b border-slate-200 border-l border-slate-100 px-3 py-3 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="text-xs font-bold text-white px-2.5 py-1 rounded-lg"
+                            style={{ background: c.bg }}>
+                            {grupo.nombre}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-normal">{grupo.dia}</span>
                         </div>
+                      </th>
+                    )
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: maxRows }, (_, rowIdx) => {
+                  // Check if this row is "Liq. Certificado" for any group
+                  const isLiqCertRow = schedules.some(s => s.rows[rowIdx]?.isLiqCert)
+                  const rowLabel = rowIdx === 0 ? 'Inicio' : isLiqCertRow ? 'Liq. Cert.' : `Pago ${rowIdx}`
 
-                        {/* Group events */}
-                        <div className="space-y-0.5">
-                          {grupos.map(({ grupo, total, pagadas, parciales }) => {
-                            const c = DIA_COLORS[grupo.dia] ?? { bg: '#64748B', text: '#fff' }
-                            const pendientes = total - pagadas - parciales
-                            return (
-                              <div
-                                key={grupo.id}
-                                className="rounded-md px-1.5 py-0.5 text-[10px] font-medium leading-tight flex items-center justify-between gap-1"
-                                style={{ background: c.bg + '20', color: c.bg, borderLeft: `2.5px solid ${c.bg}` }}
-                              >
-                                <span className="truncate">{grupo.nombre}</span>
-                                <span className="flex-shrink-0 font-semibold">
-                                  {pagadas}/{total}
-                                  {pendientes > 0 && <span className="text-red-400 ml-0.5">·{pendientes}✗</span>}
-                                </span>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )
-              })}
+                  return (
+                    <tr key={rowIdx}
+                      className={isLiqCertRow ? 'bg-blue-50' : ''}
+                    >
+                      {/* Row label */}
+                      <td className={`sticky left-0 z-10 px-3 py-2 text-xs font-semibold border-r border-slate-100 whitespace-nowrap
+                        ${isLiqCertRow ? 'bg-blue-50 text-blue-700' : rowIdx === 0 ? 'bg-slate-50 text-slate-500' : 'bg-white text-slate-400'}`}>
+                        {rowLabel}
+                      </td>
+
+                      {/* Date cells for each group */}
+                      {schedules.map(({ grupo, rows }) => {
+                        const row = rows[rowIdx]
+                        if (!row) return (
+                          <td key={grupo.id} className="border-l border-slate-50 px-3 py-2" />
+                        )
+
+                        const c = DIA_COLORS[grupo.dia] ?? { bg: '#64748B', text: '#fff' }
+
+                        return (
+                          <td key={grupo.id}
+                            className={`border-l border-slate-100 px-3 py-2 text-center whitespace-nowrap
+                              ${row.isPast    ? 'bg-slate-100' : ''}
+                              ${row.isNext    ? 'bg-yellow-50' : ''}
+                              ${row.isLiqCert ? 'bg-blue-50'   : ''}
+                            `}
+                          >
+                            {row.isPast ? (
+                              <span className="text-xs text-slate-400 line-through">{fmt(row.fecha)}</span>
+                            ) : row.isNext ? (
+                              <span className="text-xs font-bold px-2 py-0.5 rounded-md text-white"
+                                style={{ background: c.bg }}>
+                                {fmt(row.fecha)}
+                              </span>
+                            ) : row.isLiqCert ? (
+                              <span className="text-xs font-semibold text-blue-700">{fmt(row.fecha)}</span>
+                            ) : (
+                              <span className="text-xs text-slate-700">{fmt(row.fecha)}</span>
+                            )}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+
+            {/* Legend */}
+            <div className="px-4 py-3 border-t border-slate-100 bg-slate-50/60 flex flex-wrap gap-4 text-xs text-slate-500">
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-200" /> Pagado / pasado</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-yellow-100 border border-yellow-300" /> Próximo pago</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-100 border border-blue-300" /> Liq. Certificado</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-white border border-slate-200" /> Futuro</span>
             </div>
           </div>
         )}
 
-        {/* Monthly summary table by group */}
-        {!loading && stats.length > 0 && (
-          <div className="mt-6 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/60">
-              <h2 className="text-sm font-semibold text-slate-700">
+        {/* ── Monthly summary table (SIN TOCAR) ───────────────────── */}
+        {!loading && statsForMes.length > 0 && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            {/* Month navigation for summary */}
+            <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-700 capitalize">
                 Resumen — {mesLabel}
               </h2>
+              <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl px-1.5 py-1">
+                <button onClick={prevMes} className="p-1 rounded-lg hover:bg-slate-100 transition text-slate-500">
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <span className="text-xs font-medium text-slate-600 px-1 min-w-[90px] text-center capitalize">{mesLabel}</span>
+                <button onClick={nextMes} className="p-1 rounded-lg hover:bg-slate-100 transition text-slate-500">
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -232,7 +323,7 @@ export default function CalendarioPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {stats.map(({ grupo, total, pagadas, parciales }) => {
+                  {statsForMes.map(({ grupo, total, pagadas, parciales }) => {
                     const c = DIA_COLORS[grupo.dia] ?? { bg: '#64748B', text: '#fff' }
                     const pendientes = total - pagadas - parciales
                     const pct = total > 0 ? Math.round(((pagadas + parciales * 0.5) / total) * 100) : 0
