@@ -6,7 +6,6 @@ import { Plus, Minus, Trash2, X, ArrowUpRight, ArrowDownRight } from 'lucide-rea
 
 interface WalletEntry {
   id: string
-  user_id: string
   concepto: string
   monto: number        // positivo = entrada, negativo = salida
   fecha: string
@@ -15,47 +14,69 @@ interface WalletEntry {
 
 type ModalMode = 'add' | 'subtract'
 
+// ─── Supabase user_metadata helpers ──────────────────────────────────────────
+// Guardamos las entradas en user_metadata.wallet_entries (no requiere nueva tabla)
+
+async function loadFromSupabase(supabase: ReturnType<typeof createClient>): Promise<WalletEntry[]> {
+  const { data: { user } } = await supabase.auth.getUser()
+  const raw = user?.user_metadata?.wallet_entries
+  if (!raw || !Array.isArray(raw)) return []
+  return raw as WalletEntry[]
+}
+
+async function saveToSupabase(supabase: ReturnType<typeof createClient>, entries: WalletEntry[]) {
+  await supabase.auth.updateUser({ data: { wallet_entries: entries } })
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 export default function TransferenciasPage() {
-  const [entries, setEntries]           = useState<WalletEntry[]>([])
-  const [loading, setLoading]           = useState(true)
-  const [modal, setModal]               = useState<ModalMode | null>(null)
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [entries, setEntries]               = useState<WalletEntry[]>([])
+  const [loading, setLoading]               = useState(true)
+  const [saving, setSaving]                 = useState(false)
+  const [modal, setModal]                   = useState<ModalMode | null>(null)
+  const [confirmDelete, setConfirmDelete]   = useState<string | null>(null)
   const supabase = createClient()
 
   const saldo = entries.reduce((s, e) => s + Number(e.monto), 0)
 
   const load = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    const { data, error } = await supabase
-      .from('transferencias_wallet')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('fecha', { ascending: false })
-      .order('created_at', { ascending: false })
-    if (!error) setEntries(data ?? [])
+    const data = await loadFromSupabase(supabase)
+    // Ordenar por fecha desc, luego por created_at desc
+    data.sort((a, b) => b.fecha.localeCompare(a.fecha) || b.created_at.localeCompare(a.created_at))
+    setEntries(data)
     setLoading(false)
   }, [])
 
   useEffect(() => { load() }, [load])
 
+  const persist = async (newEntries: WalletEntry[]) => {
+    setSaving(true)
+    await saveToSupabase(supabase, newEntries)
+    setSaving(false)
+  }
+
   const handleAdd = async (concepto: string, monto: number, fecha: string, mode: ModalMode) => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
     const montoFinal = mode === 'subtract' ? -Math.abs(monto) : Math.abs(monto)
-    const { data, error } = await supabase
-      .from('transferencias_wallet')
-      .insert({ user_id: user.id, concepto, monto: montoFinal, fecha })
-      .select()
-      .single()
-    if (!error && data) setEntries(prev => [data as WalletEntry, ...prev])
+    const newEntry: WalletEntry = {
+      id: crypto.randomUUID(),
+      concepto,
+      monto: montoFinal,
+      fecha,
+      created_at: new Date().toISOString(),
+    }
+    const newEntries = [newEntry, ...entries].sort(
+      (a, b) => b.fecha.localeCompare(a.fecha) || b.created_at.localeCompare(a.created_at)
+    )
+    setEntries(newEntries)
     setModal(null)
+    await persist(newEntries)
   }
 
   const handleDelete = async (id: string) => {
-    await supabase.from('transferencias_wallet').delete().eq('id', id)
-    setEntries(prev => prev.filter(e => e.id !== id))
+    const newEntries = entries.filter(e => e.id !== id)
+    setEntries(newEntries)
     setConfirmDelete(null)
+    await persist(newEntries)
   }
 
   const fmt = (n: number) =>
@@ -65,12 +86,17 @@ export default function TransferenciasPage() {
     <div className="flex flex-col h-full animate-fade-in">
       {/* ── Header ─────────────────────────────────────────────── */}
       <div className="px-4 md:px-6 py-5 bg-white border-b border-slate-200 flex-shrink-0">
-        <h1 className="text-xl md:text-2xl font-bold text-slate-900">Transferencias</h1>
-        <p className="text-sm text-slate-400 mt-0.5">Control interno — independiente de Caja</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl md:text-2xl font-bold text-slate-900">Transferencias</h1>
+            <p className="text-sm text-slate-400 mt-0.5">Control interno — independiente de Caja</p>
+          </div>
+          {saving && <span className="text-xs text-slate-400 animate-pulse">Guardando…</span>}
+        </div>
       </div>
 
       {/* ── Main content ───────────────────────────────────────── */}
-      <div className="flex-1 overflow-auto p-4 md:p-6 space-y-5">
+      <div className="flex-1 overflow-auto p-4 md:p-6 space-y-4">
 
         {/* Balance card */}
         <div className={`rounded-2xl p-6 flex flex-col items-center justify-center gap-2 shadow-sm border ${
@@ -80,7 +106,7 @@ export default function TransferenciasPage() {
             Saldo disponible en transferencias
           </p>
           <p className={`text-4xl md:text-5xl font-bold tabular-nums ${saldo >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-            {fmt(saldo)}
+            {loading ? '···' : fmt(saldo)}
           </p>
         </div>
 
@@ -122,29 +148,22 @@ export default function TransferenciasPage() {
               {entries.map((e, i) => (
                 <li key={e.id}
                   className={`flex items-center gap-3 px-5 py-3.5 group transition hover:bg-slate-50/60 ${i > 0 ? 'border-t border-slate-50' : ''}`}>
-                  {/* Icon */}
                   <span className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${e.monto >= 0 ? 'bg-blue-50' : 'bg-slate-100'}`}>
                     {e.monto >= 0
                       ? <ArrowUpRight className="w-4 h-4 text-blue-500" />
                       : <ArrowDownRight className="w-4 h-4 text-slate-500" />}
                   </span>
-
-                  {/* Text */}
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-slate-800 truncate">{e.concepto}</p>
                     <p className="text-xs text-slate-400 mt-0.5">
                       {new Date(e.fecha + 'T12:00:00').toLocaleDateString('es-MX', {
-                        weekday: 'short', day: 'numeric', month: 'short', year: 'numeric'
+                        weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
                       })}
                     </p>
                   </div>
-
-                  {/* Amount */}
                   <span className={`font-bold text-base tabular-nums flex-shrink-0 ${e.monto >= 0 ? 'text-blue-600' : 'text-slate-700'}`}>
                     {e.monto >= 0 ? '+' : ''}{fmt(e.monto)}
                   </span>
-
-                  {/* Delete */}
                   <button
                     onClick={() => setConfirmDelete(e.id)}
                     className="p-1.5 rounded-lg text-slate-200 hover:text-red-400 hover:bg-red-50 transition opacity-0 group-hover:opacity-100 flex-shrink-0"
@@ -158,7 +177,7 @@ export default function TransferenciasPage() {
         </div>
       </div>
 
-      {/* ── Entry modal ────────────────────────────────────────── */}
+      {/* ── Modals ─────────────────────────────────────────────── */}
       {modal && (
         <EntryModal
           mode={modal}
@@ -167,7 +186,6 @@ export default function TransferenciasPage() {
         />
       )}
 
-      {/* ── Confirm delete ─────────────────────────────────────── */}
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
           onClick={() => setConfirmDelete(null)}>
@@ -206,22 +224,19 @@ function EntryModal({ mode, onSave, onClose }: {
   const [fecha, setFecha]       = useState(new Date().toISOString().slice(0, 10))
 
   const handleSubmit = () => {
-    const m = parseFloat(monto) || 0
+    const m = parseFloat(monto.replace(',', '.')) || 0
     if (!concepto.trim() || !m) return
     onSave(concepto.trim(), m, fecha)
   }
 
-  const PRESETS_ADD = ['Transferencia recibida', 'Colegiatura', 'Bachillerato', 'Inscripción']
+  const PRESETS_ADD = ['Transferencia recibida', 'Colegiatura', 'Bachillerato', 'Inscripción', 'Otros']
   const PRESETS_SUB = ['Sueldos semanal', 'Sueldo Alex', 'Sueldo ayudante', 'Renta', 'Servicios', 'Materiales']
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div
-        className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm mx-0 sm:mx-4 pb-safe"
-        onClick={e => e.stopPropagation()}
-      >
+      <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm mx-0 sm:mx-4" onClick={e => e.stopPropagation()}>
         {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-slate-100">
+        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
           <div className="flex items-center gap-2">
             <span className={`w-8 h-8 rounded-xl flex items-center justify-center ${isAdd ? 'bg-blue-100' : 'bg-slate-100'}`}>
               {isAdd ? <Plus className="w-4 h-4 text-blue-600" /> : <Minus className="w-4 h-4 text-slate-600" />}
@@ -236,7 +251,7 @@ function EntryModal({ mode, onSave, onClose }: {
         </div>
 
         <div className="p-6 space-y-4">
-          {/* Monto — grande y centrado */}
+          {/* Monto — grande */}
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wider">Monto</label>
             <div className="relative">
@@ -260,15 +275,14 @@ function EntryModal({ mode, onSave, onClose }: {
             <input
               value={concepto}
               onChange={e => setConcepto(e.target.value)}
-              placeholder="Ej: Colegiaturas martes"
+              placeholder="Descripción"
               className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
             />
-            {/* Quick presets */}
             <div className="flex flex-wrap gap-1.5 mt-2">
               {(isAdd ? PRESETS_ADD : PRESETS_SUB).map(p => (
                 <button key={p} onClick={() => setConcepto(p)}
                   className={`px-2.5 py-1 rounded-lg text-xs border transition ${
-                    concepto === p ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                    concepto === p ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
                   }`}>
                   {p}
                 </button>
@@ -290,11 +304,12 @@ function EntryModal({ mode, onSave, onClose }: {
           {/* Submit */}
           <button
             onClick={handleSubmit}
-            className={`w-full py-4 rounded-2xl text-white font-semibold text-base transition active:scale-95 ${
+            disabled={!monto || !concepto.trim()}
+            className={`w-full py-4 rounded-2xl text-white font-semibold text-base transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed ${
               isAdd ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-800 hover:bg-slate-700'
             }`}
           >
-            {isAdd ? `+ Agregar al saldo` : `- Descontar del saldo`}
+            {isAdd ? '+ Agregar al saldo' : '− Descontar del saldo'}
           </button>
         </div>
       </div>
