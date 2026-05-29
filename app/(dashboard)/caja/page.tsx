@@ -112,10 +112,13 @@ export default function CajaPage() {
 
   const totalIngresos = filtrados.filter(m => m.tipo === 'ingreso').reduce((s, m) => s + Number(m.monto), 0)
   const totalGastos   = filtrados.filter(m => m.tipo === 'egreso').reduce((s, m) => s + Number(m.monto), 0)
-  // Margen excluye bachillerato (no es beneficio propio)
+  // Margen excluye bachillerato completo y la mitad de 'ambos' (Col.+Bachi)
   const ingresosMargen = filtrados
     .filter(m => m.tipo === 'ingreso' && m.categoria !== 'bachillerato')
-    .reduce((s, m) => s + Number(m.monto), 0)
+    .reduce((s, m) => {
+      if (m.categoria === 'ambos') return s + Number(m.monto) / 2  // solo la parte de colegiatura
+      return s + Number(m.monto)
+    }, 0)
   const balance = ingresosMargen - totalGastos
 
   // ── Save new movement ─────────────────────────────────────────────────────

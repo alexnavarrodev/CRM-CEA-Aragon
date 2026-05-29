@@ -1,152 +1,291 @@
 'use client'
 
-import React from 'react'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
-import { TrendingUp, TrendingDown, Download } from 'lucide-react'
-import { CANAL_LABELS } from '@/lib/types'
+import React, { useState, useEffect, useCallback } from 'react'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
+import { TrendingUp, TrendingDown, ChevronLeft, ChevronRight } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
+import { MESES_FULL } from '@/lib/types'
 
-const PIE_COLORS = ['#3B82F6','#06B6D4','#8B5CF6','#F59E0B','#94A3B8']
-
-const fmt = (n: number) => `$${n.toLocaleString('es-MX')}`
-
-interface Props {
-  mesLabel: string; anio: number
-  margenMes: number; totalIngresosMes: number; totalEgresosMes: number
-  pendienteMes: number; cobradoTotal: number; totalEsperadoMes: number
-  alumnasPendientes: number; ingresosCategoria: Record<string, number>
-  semanas: { semana: string; ingresos: number; gastos: number }[]
-  movimientosCount: number; egresosCount: number
+// ─── Date helpers (sin timezone) ─────────────────────────────────────────────
+// Parsear 'YYYY-MM-DD' directo sin new Date() para evitar problemas UTC
+function parseFecha(str: string): { anio: number; mes: number; dia: number } {
+  const parts = str.slice(0, 10).split('-').map(Number)
+  return { anio: parts[0], mes: parts[1], dia: parts[2] }
 }
 
-export default function PanelClient({
-  mesLabel, anio, margenMes, totalIngresosMes, totalEgresosMes,
-  pendienteMes, cobradoTotal, totalEsperadoMes, alumnasPendientes,
-  ingresosCategoria, semanas, movimientosCount, egresosCount,
-}: Props) {
-  const margenPct = totalIngresosMes > 0 ? Math.round((margenMes / totalIngresosMes) * 100) : 0
-  const pie = Object.entries(ingresosCategoria).map(([k, v]) => ({
-    name: CANAL_LABELS[k] || k,
-    value: v,
-    pct: totalIngresosMes > 0 ? Math.round((v / totalIngresosMes) * 100) : 0,
-  }))
+function mismoMes(fecha: string, anio: number, mes: number) {
+  const p = parseFecha(fecha)
+  return p.anio === anio && p.mes === mes
+}
+
+// ─── Margen: excluye bachillerato completo, y mitad de ambos ─────────────────
+function calcMargen(
+  movimientos: { tipo: string; categoria: string; monto: number }[],
+  anio: number,
+  mes: number,
+  allMovs: { tipo: string; categoria: string; monto: number; fecha: string }[]
+) {
+  const ingresosMes = allMovs.filter(m => m.tipo === 'ingreso' && mismoMes(m.fecha, anio, mes))
+  const gastosMes   = allMovs.filter(m => m.tipo === 'egreso'  && mismoMes(m.fecha, anio, mes))
+
+  const ingresosMargen = ingresosMes.reduce((s, m) => {
+    if (m.categoria === 'bachillerato') return s          // excluir: no es beneficio
+    if (m.categoria === 'ambos')        return s + Number(m.monto) / 2  // solo la mitad (colegiatura)
+    return s + Number(m.monto)
+  }, 0)
+
+  const gastos = gastosMes.reduce((s, m) => s + Number(m.monto), 0)
+  return ingresosMargen - gastos
+}
+
+const PIE_COLORS = ['#3B82F6','#06B6D4','#8B5CF6','#F59E0B','#10B981','#94A3B8']
+const fmt = (n: number) => `$${Math.round(n).toLocaleString('es-MX')}`
+
+// ─── Etiquetas de categoría ────────────────────────────────────────────────────
+const CAT_LABELS: Record<string, string> = {
+  inscripcion: 'Inscripción', colegiatura: 'Colegiatura',
+  bachillerato: 'Bachillerato', ambos: 'Col.+Bachi',
+  materiales: 'Materiales', renta: 'Renta', sueldos: 'Sueldos',
+  servicios: 'Servicios', mantenimiento: 'Mantenimiento', otros: 'Otros',
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+export default function PanelClient() {
+  const now = new Date()
+  const [mes,  setMes]  = useState(now.getMonth() + 1)
+  const [anio, setAnio] = useState(now.getFullYear())
+  const [loading, setLoading] = useState(true)
+
+  const [movimientos, setMovimientos] = useState<{
+    id: string; tipo: string; categoria: string; monto: number; fecha: string
+  }[]>([])
+  const [alumnas, setAlumnas] = useState<{
+    id: string; programa: string; cuota_mensual: number
+  }[]>([])
+  const [pagosCol, setPagosCol] = useState<{
+    alumna_id: string; mes: number; estado: string; monto: number
+  }[]>([])
+
+  const supabase = createClient()
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    const [{ data: movs }, { data: al }, { data: pg }] = await Promise.all([
+      supabase.from('movimientos_caja').select('id,tipo,categoria,monto,fecha')
+        .eq('user_id', user.id),
+      supabase.from('alumnas').select('id,programa,cuota_mensual')
+        .eq('user_id', user.id).eq('status', 'activa'),
+      supabase.from('pagos_colegiaturas').select('alumna_id,mes,estado,monto')
+        .eq('user_id', user.id).eq('anio', anio),
+    ])
+
+    setMovimientos(movs ?? [])
+    setAlumnas(al ?? [])
+    setPagosCol(pg ?? [])
+    setLoading(false)
+  }, [anio])
+
+  useEffect(() => { load() }, [load])
+
+  // ── Cálculos del mes seleccionado ──────────────────────────────────────────
+  const ingresosMes = movimientos.filter(m => m.tipo === 'ingreso' && mismoMes(m.fecha, anio, mes))
+  const gastosMes   = movimientos.filter(m => m.tipo === 'egreso'  && mismoMes(m.fecha, anio, mes))
+
+  const totalIngresos = ingresosMes.reduce((s, m) => s + Number(m.monto), 0)
+  const totalGastos   = gastosMes.reduce((s, m) => s + Number(m.monto), 0)
+
+  const margen = (() => {
+    const ingresosSinBachi = ingresosMes.reduce((s, m) => {
+      if (m.categoria === 'bachillerato') return s
+      if (m.categoria === 'ambos')        return s + Number(m.monto) / 2
+      return s + Number(m.monto)
+    }, 0)
+    return ingresosSinBachi - totalGastos
+  })()
+
+  // Cobranza
+  const totalEsperado = alumnas
+    .filter(a => a.programa === 'colegiaturas' || a.programa === 'ambos')
+    .reduce((s, a) => s + Number(a.cuota_mensual), 0)
+
+  const cobradoMes = pagosCol
+    .filter(p => p.mes === mes && (p.estado === 'pagado' || p.estado === 'parcial'))
+    .reduce((s, p) => s + Number(p.monto), 0)
+
+  const pendienteMes = Math.max(0, totalEsperado - cobradoMes)
+
+  const alumnasPendientes = alumnas.filter(a => {
+    const p = pagosCol.find(pg => pg.alumna_id === a.id && pg.mes === mes)
+    return !p || p.estado === 'pendiente'
+  }).length
+
+  // Ingresos por categoría
+  const ingCat: Record<string, number> = {}
+  ingresosMes.forEach(m => {
+    const k = m.categoria || 'otros'
+    ingCat[k] = (ingCat[k] || 0) + Number(m.monto)
+  })
+  const pie = Object.entries(ingCat)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => ({
+      name: CAT_LABELS[k] || k,
+      value: v,
+      pct: totalIngresos > 0 ? Math.round((v / totalIngresos) * 100) : 0,
+    }))
+
+  // Evolución semanal (últimas 8 semanas)
+  const semanas = Array.from({ length: 8 }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - (7 - i) * 7)
+    const label = `${d.getDate()} ${['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][d.getMonth()]}`
+    const wStart = new Date(d); wStart.setDate(d.getDate() - d.getDay())
+    const wEnd   = new Date(wStart); wEnd.setDate(wStart.getDate() + 6)
+    const ing = movimientos.filter(m => {
+      const { anio: y, mes: mo, dia } = parseFecha(m.fecha)
+      const fd = new Date(y, mo - 1, dia)
+      return m.tipo === 'ingreso' && fd >= wStart && fd <= wEnd
+    }).reduce((s, m) => s + Number(m.monto), 0)
+    const eg = movimientos.filter(m => {
+      const { anio: y, mes: mo, dia } = parseFecha(m.fecha)
+      const fd = new Date(y, mo - 1, dia)
+      return m.tipo === 'egreso' && fd >= wStart && fd <= wEnd
+    }).reduce((s, m) => s + Number(m.monto), 0)
+    return { semana: label, ingresos: ing, gastos: eg }
+  })
+
+  // ── Month navigation ────────────────────────────────────────────────────────
+  const prevMes = () => { if (mes === 1) { setMes(12); setAnio(y => y - 1) } else setMes(m => m - 1) }
+  const nextMes = () => { if (mes === 12) { setMes(1); setAnio(y => y + 1) } else setMes(m => m + 1) }
+  const isCurrentMonth = mes === now.getMonth() + 1 && anio === now.getFullYear()
+
+  const mesLabel = MESES_FULL[mes - 1]
+  const margenPct = totalIngresos > 0 ? Math.round((margen / totalIngresos) * 100) : 0
 
   return (
-    <div className="p-6 space-y-6 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-start justify-between">
+    <div className="p-4 md:p-6 space-y-5 animate-fade-in">
+      {/* ── Header ──────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Panel del mes</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Panel</h1>
           <p className="text-slate-400 text-sm mt-0.5">
-            Resumen de {mesLabel} {anio} · actualizado al {new Date().toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}
+            {loading ? 'Cargando...' : `Resumen de ${mesLabel} ${anio}`}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {['Este mes', '3 meses', 'Año'].map((t, i) => (
-            <button key={t} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${i === 0 ? 'bg-white border border-slate-200 text-slate-800 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
-              {t}
-            </button>
-          ))}
-          <button className="flex items-center gap-1.5 px-4 py-1.5 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 hover:bg-white transition shadow-sm ml-2">
-            <Download className="w-4 h-4" /> Exportar
+
+        {/* Month picker */}
+        <div className="flex items-center gap-2 bg-slate-100 rounded-xl px-2 py-1.5">
+          <button onClick={prevMes} className="p-1.5 rounded-lg hover:bg-white transition text-slate-500">
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="text-sm font-semibold text-slate-700 capitalize min-w-[130px] text-center">
+            {mesLabel} {anio}
+          </span>
+          <button onClick={nextMes} disabled={isCurrentMonth}
+            className="p-1.5 rounded-lg hover:bg-white transition text-slate-500 disabled:opacity-30 disabled:cursor-not-allowed">
+            <ChevronRight className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      {/* ── KPI Cards ───────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         <KpiCard
           title="Margen del mes"
-          value={fmt(margenMes)}
-          badge={`${margenPct}% margen`}
-          badgeColor="emerald"
-          sub="Vas en números negros"
-          icon={<TrendingUp className="w-4 h-4" />}
-          trend={margenMes > 0 ? 'up' : 'down'}
+          subtitle="(sin bachillerato)"
+          value={fmt(margen)}
+          badge={`${margenPct}% del ingreso`}
+          badgeColor={margen >= 0 ? 'emerald' : 'red'}
+          trend={margen >= 0 ? 'up' : 'down'}
+          loading={loading}
         />
         <KpiCard
           title="Ingresos del mes"
-          value={fmt(totalIngresosMes)}
-          badge={`${movimientosCount} movimientos registrados`}
+          value={fmt(totalIngresos)}
+          badge={`${ingresosMes.length} movimientos`}
           badgeColor="blue"
-          sub={`${movimientosCount} movimientos`}
-          icon={<TrendingUp className="w-4 h-4" />}
           trend="up"
+          loading={loading}
         />
         <KpiCard
           title="Gastos del mes"
-          value={fmt(totalEgresosMes)}
-          badge={`${egresosCount} salidas registradas`}
+          value={fmt(totalGastos)}
+          badge={`${gastosMes.length} salidas`}
           badgeColor="red"
-          sub={`${egresosCount} salidas`}
-          icon={<TrendingDown className="w-4 h-4" />}
           trend="down"
+          loading={loading}
         />
         <KpiCard
           title="Cobranza pendiente"
           value={fmt(pendienteMes)}
-          badge={`${alumnasPendientes} alumnas con saldo`}
-          badgeColor="red"
-          sub={`Cobrado ${fmt(cobradoTotal)} de ${fmt(totalEsperadoMes)}`}
-          icon={<TrendingDown className="w-4 h-4" />}
+          badge={`${alumnasPendientes} alumnas`}
+          badgeColor={pendienteMes > 0 ? 'amber' : 'emerald'}
+          sub={`Cobrado ${fmt(cobradoMes)} de ${fmt(totalEsperado)}`}
           trend="down"
+          loading={loading}
         />
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-3 gap-4">
+      {/* ── Charts ──────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Weekly evolution */}
-        <div className="col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-          <div className="mb-1">
-            <h2 className="font-semibold text-slate-800">Evolución semanal</h2>
-            <p className="text-xs text-slate-400">Ingresos vs. gastos por semana</p>
-          </div>
-          <div className="flex items-center gap-4 mt-2 mb-4">
-            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" /><span className="text-xs text-slate-500">Ingresos</span></div>
-            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block" /><span className="text-xs text-slate-500">Gastos</span></div>
+        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+          <h2 className="font-semibold text-slate-800">Evolución semanal</h2>
+          <p className="text-xs text-slate-400 mb-4">Ingresos vs. gastos por semana (últimas 8 semanas)</p>
+          <div className="flex items-center gap-4 mb-4">
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" /><span className="text-xs text-slate-500">Ingresos</span></div>
+            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-slate-400" /><span className="text-xs text-slate-500">Gastos</span></div>
           </div>
           {semanas.some(s => s.ingresos > 0 || s.gastos > 0) ? (
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={semanas} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
                 <XAxis dataKey="semana" tick={{ fontSize: 11, fill: '#94A3B8' }} tickLine={false} axisLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#94A3B8' }} tickLine={false} axisLine={false} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
-                <Tooltip formatter={(v) => fmt(Number(v))} labelStyle={{ color: '#334155' }} contentStyle={{ borderRadius: 10, border: '1px solid #E2E8F0', fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 11, fill: '#94A3B8' }} tickLine={false} axisLine={false}
+                  tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
+                <Tooltip formatter={(v) => fmt(Number(v))} labelStyle={{ color: '#334155' }}
+                  contentStyle={{ borderRadius: 10, border: '1px solid #E2E8F0', fontSize: 12 }} />
                 <Line type="monotone" dataKey="ingresos" stroke="#3B82F6" strokeWidth={2} dot={{ r: 3 }} />
                 <Line type="monotone" dataKey="gastos"   stroke="#94A3B8" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
           ) : (
-            <div className="h-48 flex items-center justify-center text-slate-300 text-sm">Sin datos aún — registra movimientos en Caja</div>
+            <div className="h-48 flex items-center justify-center text-slate-300 text-sm">
+              Sin datos en este período
+            </div>
           )}
         </div>
 
-        {/* Income by channel */}
+        {/* Income by category */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-          <div className="mb-4">
-            <h2 className="font-semibold text-slate-800">Ingresos por canal</h2>
-            <p className="text-xs text-slate-400">De dónde está entrando el dinero</p>
-          </div>
+          <h2 className="font-semibold text-slate-800">Ingresos por categoría</h2>
+          <p className="text-xs text-slate-400 mb-4">De dónde está entrando el dinero</p>
           {pie.length > 0 ? (
             <>
               <div className="flex items-center justify-center">
                 <PieChart width={160} height={160}>
-                  <Pie data={pie} cx={75} cy={75} innerRadius={50} outerRadius={70} dataKey="value" paddingAngle={2}>
+                  <Pie data={pie} cx={75} cy={75} innerRadius={50} outerRadius={70}
+                    dataKey="value" paddingAngle={2}>
                     {pie.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                   </Pie>
-                  <text x={80} y={72} textAnchor="middle" dominantBaseline="middle" className="text-lg font-bold" style={{ fontSize: 16, fontWeight: 700, fill: '#0F172A' }}>
-                    {fmt(totalIngresosMes).replace('$','')}
+                  <text x={80} y={72} textAnchor="middle" dominantBaseline="middle"
+                    style={{ fontSize: 16, fontWeight: 700, fill: '#0F172A' }}>
+                    {fmt(totalIngresos).replace('$','')}
                   </text>
-                  <text x={80} y={91} textAnchor="middle" dominantBaseline="middle" style={{ fontSize: 10, fill: '#94A3B8' }}>Total mes</text>
+                  <text x={80} y={91} textAnchor="middle" dominantBaseline="middle"
+                    style={{ fontSize: 10, fill: '#94A3B8' }}>Total mes</text>
                 </PieChart>
               </div>
               <div className="mt-2 space-y-1.5">
                 {pie.map((item, i) => (
                   <div key={i} className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
-                      <span className="text-slate-600">{item.name}</span>
+                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                      <span className="text-slate-600 text-xs">{item.name}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-slate-700">{fmt(item.value)}</span>
+                      <span className="font-medium text-slate-700 text-sm">{fmt(item.value)}</span>
                       <span className="text-slate-400 text-xs w-8 text-right">{item.pct}%</span>
                     </div>
                   </div>
@@ -154,7 +293,9 @@ export default function PanelClient({
               </div>
             </>
           ) : (
-            <div className="h-48 flex items-center justify-center text-slate-300 text-sm text-center">Sin ingresos este mes</div>
+            <div className="h-48 flex items-center justify-center text-slate-300 text-sm text-center">
+              Sin ingresos en {mesLabel}
+            </div>
           )}
         </div>
       </div>
@@ -162,24 +303,28 @@ export default function PanelClient({
   )
 }
 
-function KpiCard({ title, value, badge, badgeColor, sub, trend }: {
-  title: string; value: string; badge: string; badgeColor: string; sub: string; icon?: React.ReactNode; trend: 'up' | 'down'
+// ─── KpiCard ──────────────────────────────────────────────────────────────────
+function KpiCard({ title, subtitle, value, badge, badgeColor, sub, trend, loading }: {
+  title: string; subtitle?: string; value: string; badge: string
+  badgeColor: string; sub?: string; trend: 'up' | 'down'; loading?: boolean
 }) {
-  const colors = {
+  const colors: Record<string, string> = {
     emerald: 'bg-emerald-50 text-emerald-700',
     blue:    'bg-blue-50 text-blue-700',
     red:     'bg-red-50 text-red-600',
     amber:   'bg-amber-50 text-amber-700',
   }
-  const badgeStyle = colors[badgeColor as keyof typeof colors] || colors.blue
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-      <p className="text-slate-500 text-sm mb-1">{title}</p>
-      <p className="text-[28px] font-bold text-slate-900 leading-none">{value}</p>
-      <div className={`inline-flex items-center gap-1 mt-2.5 px-2.5 py-1 rounded-lg text-xs font-medium ${badgeStyle}`}>
-        {trend === 'up' ? '↑' : '↓'} {badge}
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 md:p-5">
+      <p className="text-slate-500 text-sm">{title}</p>
+      {subtitle && <p className="text-slate-400 text-[10px]">{subtitle}</p>}
+      <p className={`text-[26px] md:text-[28px] font-bold text-slate-900 leading-none mt-1 ${loading ? 'animate-pulse text-slate-200' : ''}`}>
+        {loading ? '···' : value}
+      </p>
+      <div className={`inline-flex items-center gap-1 mt-2.5 px-2.5 py-1 rounded-lg text-xs font-medium ${colors[badgeColor] || colors.blue}`}>
+        {trend === 'up' ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />} {badge}
       </div>
-      <p className="text-xs text-slate-400 mt-1.5">{sub}</p>
+      {sub && <p className="text-xs text-slate-400 mt-1.5">{sub}</p>}
     </div>
   )
 }
