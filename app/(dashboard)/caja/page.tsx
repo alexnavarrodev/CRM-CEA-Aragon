@@ -50,6 +50,26 @@ const BACHI_CONCEPTOS = [
 
 const mesToBachiTipo = (mes: number) => MESES[mes - 1].toLowerCase()
 
+// ─── Secuencias cronológicas de meses (Nov 2025 → Dic 2027) ──────────────────
+const TIPOS_BACHI = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
+
+function bachiMonthSequence(): { anio: number; tipo: string }[] {
+  const seq: { anio: number; tipo: string }[] = []
+  for (let anio = 2025; anio <= 2027; anio++) {
+    const start = anio === 2025 ? 10 : 0 // index 10 = 'nov'
+    for (let i = start; i < 12; i++) seq.push({ anio, tipo: TIPOS_BACHI[i] })
+  }
+  return seq
+}
+function colMonthSequence(): { anio: number; mes: number }[] {
+  const seq: { anio: number; mes: number }[] = []
+  for (let anio = 2025; anio <= 2027; anio++) {
+    const start = anio === 2025 ? 11 : 1
+    for (let m = start; m <= 12; m++) seq.push({ anio, mes: m })
+  }
+  return seq
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 type MovRow = MovimientoCaja & { alumna?: { nombre: string } | null }
 
@@ -138,37 +158,82 @@ export default function CajaPage() {
       .single()
     if (row) setMovimientos(prev => [row as MovRow, ...prev])
 
+    // Límite de colegiatura: 1000 para 'ambos', cuota real para colegiatura pura
+    let colLimit = 1000
+    if (alumna_id) {
+      const { data: al } = await supabase
+        .from('alumnas').select('programa, cuota_mensual').eq('id', alumna_id).maybeSingle()
+      if (al) colLimit = al.programa === 'ambos' ? 1000 : Number(al.cuota_mensual) || 1000
+    }
+
+    // ── Acumula un pago de colegiatura llenando meses de a poco (límite por mes) ──
     const upsertCol = async (montoCol: number) => {
-      if (!alumna_id || !mes) return
-      const { data: ex } = await supabase
-        .from('pagos_colegiaturas').select('id')
-        .eq('alumna_id', alumna_id).eq('anio', anio).eq('mes', mes).maybeSingle()
-      if (ex) {
-        await supabase.from('pagos_colegiaturas')
-          .update({ monto: montoCol, estado: 'pagado', fecha_pago: payload.fecha })
-          .eq('id', ex.id)
-      } else {
-        await supabase.from('pagos_colegiaturas').insert({
-          user_id: user.id, alumna_id, anio, mes,
-          monto: montoCol, estado: 'pagado', fecha_pago: payload.fecha,
-        })
+      if (!alumna_id || !mes || montoCol <= 0) return
+      const { data: existing } = await supabase
+        .from('pagos_colegiaturas').select('id, anio, mes, monto')
+        .eq('alumna_id', alumna_id)
+      const bal: Record<string, number> = {}
+      const ids: Record<string, string> = {}
+      ;(existing ?? []).forEach(p => {
+        const k = `${p.anio}-${p.mes}`; bal[k] = Number(p.monto); ids[k] = p.id
+      })
+      const seq = colMonthSequence()
+      const startIdx = Math.max(0, seq.findIndex(s => s.anio === anio && s.mes === mes))
+      let remaining = montoCol
+      for (let i = startIdx; i < seq.length && remaining > 0; i++) {
+        const { anio: y, mes: m } = seq[i]
+        const k = `${y}-${m}`
+        const current = bal[k] ?? 0
+        if (current >= colLimit) continue
+        const add = Math.min(colLimit - current, remaining)
+        const newBal = current + add
+        remaining -= add
+        const estado = newBal >= colLimit ? 'pagado' : 'parcial'
+        if (ids[k]) {
+          await supabase.from('pagos_colegiaturas')
+            .update({ monto: newBal, estado, fecha_pago: payload.fecha }).eq('id', ids[k])
+        } else {
+          await supabase.from('pagos_colegiaturas').insert({
+            user_id: user.id, alumna_id, anio: y, mes: m,
+            monto: newBal, estado, fecha_pago: payload.fecha,
+          })
+        }
       }
     }
 
-    const upsertBachi = async (montoBachi: number, tipo: string) => {
-      if (!alumna_id || !tipo) return
-      const { data: ex } = await supabase
-        .from('pagos_bachillerato').select('id')
-        .eq('alumna_id', alumna_id).eq('anio', anio).eq('tipo', tipo).maybeSingle()
-      if (ex) {
-        await supabase.from('pagos_bachillerato')
-          .update({ monto: montoBachi, estado: 'pagado', fecha_pago: payload.fecha })
-          .eq('id', ex.id)
-      } else {
-        await supabase.from('pagos_bachillerato').insert({
-          user_id: user.id, alumna_id, anio, tipo,
-          monto: montoBachi, estado: 'pagado', fecha_pago: payload.fecha,
-        })
+    // ── Acumula un pago de bachillerato (límite 1000 por mes) ────────────────────
+    const upsertBachi = async (montoBachi: number, startTipo: string) => {
+      if (!alumna_id || !startTipo || montoBachi <= 0) return
+      const LIMIT = 1000
+      const { data: existing } = await supabase
+        .from('pagos_bachillerato').select('id, anio, tipo, monto')
+        .eq('alumna_id', alumna_id)
+      const bal: Record<string, number> = {}
+      const ids: Record<string, string> = {}
+      ;(existing ?? []).forEach(p => {
+        const k = `${p.anio}-${p.tipo}`; bal[k] = Number(p.monto); ids[k] = p.id
+      })
+      const seq = bachiMonthSequence()
+      const startIdx = Math.max(0, seq.findIndex(s => s.anio === anio && s.tipo === startTipo))
+      let remaining = montoBachi
+      for (let i = startIdx; i < seq.length && remaining > 0; i++) {
+        const { anio: y, tipo } = seq[i]
+        const k = `${y}-${tipo}`
+        const current = bal[k] ?? 0
+        if (current >= LIMIT) continue
+        const add = Math.min(LIMIT - current, remaining)
+        const newBal = current + add
+        remaining -= add
+        const estado = newBal >= LIMIT ? 'pagado' : 'parcial'
+        if (ids[k]) {
+          await supabase.from('pagos_bachillerato')
+            .update({ monto: newBal, estado, fecha_pago: payload.fecha }).eq('id', ids[k])
+        } else {
+          await supabase.from('pagos_bachillerato').insert({
+            user_id: user.id, alumna_id, anio: y, tipo,
+            monto: newBal, estado, fecha_pago: payload.fecha,
+          })
+        }
       }
     }
 
@@ -177,7 +242,8 @@ export default function CajaPage() {
       if (payload.categoria === 'bachillerato') await upsertBachi(payload.monto, tipoBachi)
       if (payload.categoria === 'ambos') {
         const mitad = payload.monto / 2
-        await Promise.all([upsertCol(mitad), upsertBachi(mitad, mesToBachiTipo(mes))])
+        await upsertCol(mitad)
+        await upsertBachi(mitad, mesToBachiTipo(mes))
       }
     }
     setModal(false)

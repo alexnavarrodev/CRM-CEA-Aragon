@@ -147,7 +147,8 @@ export default function PanelClient() {
     .filter(p => p.anio === anio && p.mes === mes &&
       (p.estado === 'pagado' || p.estado === 'parcial'))
     .reduce((s, p) => s + Number(p.monto), 0)
-  const pendienteMes     = Math.max(0, totalEsperado - cobradoMes)
+  // El número grande es la suma real de las deudas de la lista (coincide con el modal)
+  const pendienteMes     = pendingDetails.reduce((s, d) => s + d.totalDebt, 0)
   const alumnasPendientes = pendingDetails.length
 
   // Ingresos por categoría (gráfico)
