@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Grupo, Alumna, PagoColegiatura, DIA_COLORS } from '@/lib/types'
-import { ChevronLeft, ChevronRight, Plus, Trash2, X, RefreshCw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Trash2, X, RefreshCw, Copy } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface PaymentCalendar {
@@ -11,8 +11,8 @@ interface PaymentCalendar {
   nombre: string
   color: string        // hex
   inicio: string       // 'DD/MM/YYYY'
-  pagos: string[]      // exactly 11 entries 'DD/MM/YYYY'
-  liqCertIndex: number // 0–10, which pagos[] index is Liq. Certificado
+  pagos: string[]      // N entradas 'DD/MM/YYYY' (variable, mínimo 1)
+  liqCertIndex: number // índice de pagos[] que es Liq. Certificado
 }
 
 // ─── Exact dates from image ───────────────────────────────────────────────────
@@ -91,14 +91,14 @@ function occurrenceInMonth(dt: Date): number {
     if (new Date(dt.getFullYear(), dt.getMonth(), d).getDay() === dt.getDay()) c++
   return c
 }
-function autoGeneratePagos(inicioStr: string): string[] {
-  if (!inicioStr) return Array(11).fill('')
+function autoGeneratePagos(inicioStr: string, count = 11): string[] {
+  if (!inicioStr) return Array(count).fill('')
   const inicio = parseDMY(inicioStr)
   const wd = inicio.getDay()
   const nth = occurrenceInMonth(inicio)
   const result: string[] = []
   let y = inicio.getFullYear(), m = inicio.getMonth() + 1
-  for (let i = 0; i < 11; i++) {
+  for (let i = 0; i < count; i++) {
     m++; if (m > 12) { m = 1; y++ }
     const dt = nthWeekday(y, m, wd, nth) ?? nthWeekday(y, m, wd, nth > 1 ? nth - 1 : 1) ?? new Date(y, m - 1, 14)
     result.push(fmtDMY(dt))
@@ -124,6 +124,7 @@ export default function CalendarioPage() {
   const [loadingCals, setLoadingCals] = useState(true)
   const [saving, setSaving]           = useState(false)
   const [addModal, setAddModal]       = useState(false)
+  const [templateCal, setTemplateCal] = useState<PaymentCalendar | null>(null) // para copiar
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
 
   // Summary section
@@ -184,9 +185,14 @@ export default function CalendarioPage() {
     await persist(updated)
   }
 
+  // Abrir modal en blanco o como copia
+  const openNew  = () => { setTemplateCal(null); setAddModal(true) }
+  const openCopy = (cal: PaymentCalendar) => { setTemplateCal(cal); setAddModal(true) }
+
   // ── Table rendering ──────────────────────────────────────────────────────
-  // All calendars have exactly 11 pagos + 1 Inicio = 12 rows
-  const TOTAL_ROWS = 12 // Inicio + 11 pagos
+  // Filas = 1 (Inicio) + el máximo de pagos entre todos los calendarios
+  const maxPagos = calendars.reduce((m, c) => Math.max(m, c.pagos.length), 0)
+  const TOTAL_ROWS = 1 + maxPagos
 
   const rowLabel = (rowIdx: number, cals: PaymentCalendar[]) => {
     if (rowIdx === 0) return 'Inicio'
@@ -226,7 +232,7 @@ export default function CalendarioPage() {
           </div>
           <div className="flex items-center gap-2">
             {saving && <span className="text-xs text-slate-400 animate-pulse">Guardando…</span>}
-            <button onClick={() => setAddModal(true)}
+            <button onClick={openNew}
               className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition shadow-sm">
               <Plus className="w-4 h-4" />
               <span className="hidden sm:inline">Nuevo calendario</span>
@@ -255,20 +261,25 @@ export default function CalendarioPage() {
                   <th className="sticky left-0 bg-white z-10 w-24 border-b border-slate-200" />
                   {calendars.map(cal => (
                     <th key={cal.id} className="border-b border-slate-200 border-l border-slate-100 px-2 py-3 text-center">
-                      <div className="flex flex-col items-center gap-1">
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs font-bold text-white px-2.5 py-1 rounded-lg"
-                            style={{ background: cal.color }}>
-                            {cal.nombre}
-                          </span>
-                          <button
-                            onClick={() => setDeleteConfirm(cal.id)}
-                            className="p-1 text-slate-300 hover:text-red-400 hover:bg-red-50 rounded-lg transition"
-                            title="Eliminar"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
+                      <div className="flex items-center justify-center gap-1">
+                        <span className="text-xs font-bold text-white px-2.5 py-1 rounded-lg"
+                          style={{ background: cal.color }}>
+                          {cal.nombre}
+                        </span>
+                        <button
+                          onClick={() => openCopy(cal)}
+                          className="p-1 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition"
+                          title="Copiar calendario"
+                        >
+                          <Copy className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => setDeleteConfirm(cal.id)}
+                          className="p-1 text-slate-300 hover:text-red-400 hover:bg-red-50 rounded-lg transition"
+                          title="Eliminar"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
                       </div>
                     </th>
                   ))}
@@ -401,8 +412,9 @@ export default function CalendarioPage() {
       {/* ── Add Calendar Modal ─────────────────────────────────────── */}
       {addModal && (
         <AddCalendarModal
+          template={templateCal}
           onSave={handleAddCalendar}
-          onClose={() => setAddModal(false)}
+          onClose={() => { setAddModal(false); setTemplateCal(null) }}
         />
       )}
 
@@ -434,36 +446,50 @@ export default function CalendarioPage() {
 }
 
 // ─── Add Calendar Modal ───────────────────────────────────────────────────────
-function AddCalendarModal({ onSave, onClose }: {
+function AddCalendarModal({ template, onSave, onClose }: {
+  template?: PaymentCalendar | null
   onSave: (cal: PaymentCalendar) => void
   onClose: () => void
 }) {
-  const [nombre,       setNombre]       = useState('')
-  const [color,        setColor]        = useState(COLOR_PRESETS[0])
-  const [inicio,       setInicio]       = useState('')   // 'YYYY-MM-DD' (input value)
-  const [pagos,        setPagos]        = useState<string[]>(Array(11).fill(''))  // 'YYYY-MM-DD'
-  const [liqCertIdx,   setLiqCertIdx]   = useState(7)    // 0-based
+  const isCopy = !!template
+  const [nombre,     setNombre]     = useState(template ? `${template.nombre} (copia)` : '')
+  const [color,      setColor]      = useState(template ? template.color : COLOR_PRESETS[0])
+  const [inicio,     setInicio]     = useState(template ? toInput(template.inicio) : '')  // 'YYYY-MM-DD'
+  const [pagos,      setPagos]      = useState<string[]>(
+    template ? template.pagos.map(toInput) : Array(11).fill('')
+  )
+  const [liqCertIdx, setLiqCertIdx] = useState(template ? template.liqCertIndex : 7)
 
   const handleAutoGenerate = () => {
     if (!inicio) return
-    const inicioStr = fromInput(inicio)
-    const generated = autoGeneratePagos(inicioStr)
+    const generated = autoGeneratePagos(fromInput(inicio), pagos.length)
     setPagos(generated.map(toInput))
   }
 
+  const addPago = () => setPagos(prev => [...prev, ''])
+  const removePago = (idx: number) => {
+    setPagos(prev => prev.filter((_, j) => j !== idx))
+    // Ajustar liqCertIdx si se elimina antes o en su posición
+    setLiqCertIdx(prev => {
+      if (idx < prev) return prev - 1
+      if (idx === prev) return Math.max(0, prev - 1)
+      return prev
+    })
+  }
+
   const handleSave = () => {
-    if (!nombre.trim() || !inicio || pagos.some(p => !p)) return
+    if (!nombre.trim() || !inicio || pagos.length === 0 || pagos.some(p => !p)) return
     onSave({
       id: `cal-${Date.now()}`,
       nombre: nombre.trim(),
       color,
       inicio: fromInput(inicio),
       pagos: pagos.map(fromInput),
-      liqCertIndex: liqCertIdx,
+      liqCertIndex: Math.min(liqCertIdx, pagos.length - 1),
     })
   }
 
-  const allFilled = nombre.trim() && inicio && pagos.every(p => p)
+  const allFilled = nombre.trim() && inicio && pagos.length > 0 && pagos.every(p => p)
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm"
@@ -472,11 +498,20 @@ function AddCalendarModal({ onSave, onClose }: {
         onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 flex-shrink-0">
-          <h3 className="font-semibold text-slate-900">Nuevo calendario de pagos</h3>
+          <h3 className="font-semibold text-slate-900">
+            {isCopy ? 'Copiar calendario' : 'Nuevo calendario de pagos'}
+          </h3>
           <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-xl"><X className="w-4 h-4 text-slate-400" /></button>
         </div>
 
         <div className="overflow-y-auto flex-1 p-6 space-y-5">
+          {isCopy && (
+            <div className="flex items-center gap-2 text-xs text-blue-600 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
+              <Copy className="w-3.5 h-3.5 flex-shrink-0" />
+              Copiando «{template!.nombre}». Edita lo que necesites antes de guardar.
+            </div>
+          )}
+
           {/* Nombre + Color */}
           <div className="flex gap-3">
             <div className="flex-1">
@@ -516,7 +551,7 @@ function AddCalendarModal({ onSave, onClose }: {
                 Auto-generar
               </button>
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">Introduce la fecha de inicio y pulsa Auto-generar para rellenar los 11 pagos automáticamente.</p>
+            <p className="text-[11px] text-slate-400 mt-1">Rellena automáticamente todos los pagos (mismo día del mes) a partir de la fecha de inicio.</p>
           </div>
 
           {/* Liq. Cert position */}
@@ -524,27 +559,45 @@ function AddCalendarModal({ onSave, onClose }: {
             <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Fila de Liq. Certificado</label>
             <select value={liqCertIdx} onChange={e => setLiqCertIdx(Number(e.target.value))}
               className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-              {Array.from({ length: 11 }, (_, i) => (
+              {pagos.map((_, i) => (
                 <option key={i} value={i}>Pago {i + 1}</option>
               ))}
             </select>
           </div>
 
-          {/* 11 payment dates */}
+          {/* Payment dates (variable) */}
           <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wider">11 fechas de pago</label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                {pagos.length} fechas de pago
+              </label>
+            </div>
             <div className="grid grid-cols-2 gap-2">
               {pagos.map((p, i) => (
-                <div key={i} className={`flex items-center gap-2 p-2 rounded-xl border ${liqCertIdx === i ? 'border-blue-300 bg-blue-50' : 'border-slate-200'}`}>
-                  <span className={`text-[10px] font-semibold w-14 flex-shrink-0 ${liqCertIdx === i ? 'text-blue-600' : 'text-slate-400'}`}>
+                <div key={i} className={`flex items-center gap-1.5 p-2 rounded-xl border ${liqCertIdx === i ? 'border-blue-300 bg-blue-50' : 'border-slate-200'}`}>
+                  <span className={`text-[10px] font-semibold w-12 flex-shrink-0 ${liqCertIdx === i ? 'text-blue-600' : 'text-slate-400'}`}>
                     {liqCertIdx === i ? 'Liq.Cert' : `Pago ${i + 1}`}
                   </span>
                   <input type="date" value={p}
                     onChange={e => setPagos(prev => prev.map((v, j) => j === i ? e.target.value : v))}
-                    className="flex-1 min-w-0 px-2 py-1 text-xs border-0 focus:outline-none bg-transparent text-slate-700" />
+                    className="flex-1 min-w-0 px-1.5 py-1 text-xs border-0 focus:outline-none bg-transparent text-slate-700" />
+                  {pagos.length > 1 && (
+                    <button onClick={() => removePago(i)}
+                      className="p-0.5 text-slate-300 hover:text-red-400 rounded transition flex-shrink-0"
+                      title="Quitar este pago">
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
+
+            {/* Añadir pago después del último */}
+            <button onClick={addPago}
+              className="mt-2 w-full flex items-center justify-center gap-1.5 py-2.5 border border-dashed border-blue-300 text-blue-600 rounded-xl text-sm font-medium hover:bg-blue-50 transition">
+              <Plus className="w-4 h-4" />
+              Añadir pago {pagos.length + 1}
+            </button>
           </div>
         </div>
 
@@ -556,7 +609,7 @@ function AddCalendarModal({ onSave, onClose }: {
           </button>
           <button onClick={handleSave} disabled={!allFilled}
             className="flex-1 py-3 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition disabled:opacity-40 disabled:cursor-not-allowed">
-            Guardar calendario
+            {isCopy ? 'Guardar copia' : 'Guardar calendario'}
           </button>
         </div>
       </div>
