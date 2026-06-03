@@ -124,3 +124,27 @@ LUN #6366F1, MAR #3B82F6, MIE #06B6D4, JUE #D97706, VIE #10B981, SAB #8B5CF6, DO
 - Para tocar datos directamente: script Node con `@supabase/supabase-js` y la
   `SUPABASE_SERVICE_ROLE_KEY` (está en `.env.local`), ejecutado desde la carpeta
   del proyecto (`cd` primero para que resuelva el módulo).
+
+## Multi-escuela / Plan de separación futura
+
+La esposa de Alex usa el MISMO CRM para SU propia escuela (cuenta independiente).
+- **Hoy**: app compartida (un solo código, un Netlify, un Supabase). Los datos ya
+  están aislados por RLS (`user_id`), así que cada quien ve solo lo suyo.
+- **Riesgo mientras se comparte**: un deploy de cambios de Alex también afecta a la
+  app de ella (mismo sitio). No toca sus datos, pero un fallo le afectaría visualmente.
+- **Disparador para separar**: el primer cambio de UI/regla que ella quiera y Alex no.
+  En cuanto las necesidades divergen, NO meter lógica condicional "si es ella/si es él";
+  en su lugar **forkear en dos apps 100% independientes**.
+
+### Cómo forkear cuando llegue el momento
+1. **Código**: duplicar el repo de GitHub (nuevo repo para ella).
+2. **Web**: crear un sitio nuevo en Netlify (otra URL/dominio) apuntando a su repo.
+3. **Base de datos**: crear un proyecto Supabase NUEVO para ella; correr el mismo
+   esquema (tablas + RLS). Alex se queda con el Supabase actual (tiene su histórico
+   importado); ella arranca limpio.
+4. **Migrar datos de ella**: exportar sus filas (alumnas, pagos, movimientos, etc.)
+   del Supabase compartido e importarlas en su proyecto nuevo. Lleva poco tiempo
+   activa, así que serán pocos datos.
+5. Variables de entorno propias en su Netlify (su OPENAI_API_KEY si aplica).
+
+Resultado: dos apps separadas, cero conflictos, cada quien manda en la suya.
