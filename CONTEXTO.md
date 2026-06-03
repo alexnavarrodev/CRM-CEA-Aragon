@@ -127,6 +127,13 @@ LUN #6366F1, MAR #3B82F6, MIE #06B6D4, JUE #D97706, VIE #10B981, SAB #8B5CF6, DO
 
 ## Multi-escuela / Plan de separación futura
 
+**Las dos escuelas (para nombrar bien proyectos al separar):**
+- **CEA Aragón** → escuela de Alex (la actual: repo `CRM-CEA-Aragon`, sitio Netlify
+  `crm-cea-aragon`, Supabase `ouhikbqtwadppsuspsst`). Se queda con todo lo existente.
+- **CEA Roma** → escuela de la esposa. Al separar, nombrar sus recursos en torno a
+  "cea-roma" (ej. repo `CRM-CEA-Roma`, sitio Netlify `crm-cea-roma`, proyecto Supabase
+  nuevo "CEA Roma") para diferenciarlos sin confusión.
+
 La esposa de Alex usa el MISMO CRM para SU propia escuela (cuenta independiente).
 - **Hoy**: app compartida (un solo código, un Netlify, un Supabase). Los datos ya
   están aislados por RLS (`user_id`), así que cada quien ve solo lo suyo.
