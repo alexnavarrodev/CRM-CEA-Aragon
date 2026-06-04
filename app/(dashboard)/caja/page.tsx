@@ -560,7 +560,6 @@ function CategoriaModal({ categorias, catsEnUso, onSave, onClose }: {
   const [cats, setCats]         = useState(categorias)
   const [editKey, setEditKey]   = useState<string | null>(null)
   const [editLabel, setEditLabel] = useState('')
-  const [newKey, setNewKey]     = useState('')
   const [newLabel, setNewLabel] = useState('')
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
 
@@ -581,12 +580,15 @@ function CategoriaModal({ categorias, catsEnUso, onSave, onClose }: {
   }
 
   const addCat = () => {
-    const k = newKey.trim().toLowerCase().replace(/\s+/g, '_')
     const l = newLabel.trim()
-    if (!k || !l) return
-    if (cats.some(c => c.key === k)) return
+    if (!l) return
+    // Clave auto-generada desde el nombre (sin acentos, minúsculas, guion bajo)
+    const k = l.toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+    if (!k) return
+    if (cats.some(c => c.key === k)) { setNewLabel(''); return } // ya existe
     setCats(prev => [...prev, { key: k, label: l }])
-    setNewKey('')
     setNewLabel('')
   }
 
