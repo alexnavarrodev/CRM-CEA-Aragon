@@ -170,12 +170,14 @@ export default function CajaPage() {
     const upsertCol = async (montoCol: number) => {
       if (!alumna_id || !mes || montoCol <= 0) return
       const { data: existing } = await supabase
-        .from('pagos_colegiaturas').select('id, anio, mes, monto')
+        .from('pagos_colegiaturas').select('id, anio, mes, monto, estado')
         .eq('alumna_id', alumna_id)
       const bal: Record<string, number> = {}
       const ids: Record<string, string> = {}
       ;(existing ?? []).forEach(p => {
-        const k = `${p.anio}-${p.mes}`; bal[k] = Number(p.monto); ids[k] = p.id
+        // Saldo ya PAGADO: 'pagado' = lleno, 'parcial' = su monto, 'pendiente' = 0 (aunque tenga monto placeholder)
+        const pagado = p.estado === 'pagado' ? colLimit : p.estado === 'parcial' ? Number(p.monto) : 0
+        const k = `${p.anio}-${p.mes}`; bal[k] = pagado; ids[k] = p.id
       })
       const seq = colMonthSequence()
       // Mes seleccionado en el modal
@@ -222,12 +224,13 @@ export default function CajaPage() {
       if (!alumna_id || !startTipo || montoBachi <= 0) return
       const LIMIT = 1000
       const { data: existing } = await supabase
-        .from('pagos_bachillerato').select('id, anio, tipo, monto')
+        .from('pagos_bachillerato').select('id, anio, tipo, monto, estado')
         .eq('alumna_id', alumna_id)
       const bal: Record<string, number> = {}
       const ids: Record<string, string> = {}
       ;(existing ?? []).forEach(p => {
-        const k = `${p.anio}-${p.tipo}`; bal[k] = Number(p.monto); ids[k] = p.id
+        const pagado = p.estado === 'pagado' ? LIMIT : p.estado === 'parcial' ? Number(p.monto) : 0
+        const k = `${p.anio}-${p.tipo}`; bal[k] = pagado; ids[k] = p.id
       })
       const seq = bachiMonthSequence()
       const selIdx = Math.max(0, seq.findIndex(s => s.anio === anio && s.tipo === startTipo))
