@@ -178,7 +178,23 @@ export default function CajaPage() {
         const k = `${p.anio}-${p.mes}`; bal[k] = Number(p.monto); ids[k] = p.id
       })
       const seq = colMonthSequence()
-      const startIdx = Math.max(0, seq.findIndex(s => s.anio === anio && s.mes === mes))
+      // Mes seleccionado en el modal
+      const selIdx = Math.max(0, seq.findIndex(s => s.anio === anio && s.mes === mes))
+      // Primer mes con algún registro de la alumna
+      let firstRecordIdx = seq.length
+      ;(existing ?? []).forEach(p => {
+        const idx = seq.findIndex(s => s.anio === p.anio && s.mes === p.mes)
+        if (idx >= 0 && idx < firstRecordIdx) firstRecordIdx = idx
+      })
+      // Punto de partida del barrido: el más temprano entre su primer registro y el mes elegido
+      const lowerBound = (existing && existing.length > 0) ? Math.min(firstRecordIdx, selIdx) : selIdx
+      // Avanzar hasta el primer mes que NO esté pagado completo (el más antiguo pendiente)
+      let startIdx = lowerBound
+      while (startIdx < seq.length) {
+        const { anio: y, mes: m } = seq[startIdx]
+        if ((bal[`${y}-${m}`] ?? 0) < colLimit) break
+        startIdx++
+      }
       let remaining = montoCol
       for (let i = startIdx; i < seq.length && remaining > 0; i++) {
         const { anio: y, mes: m } = seq[i]
@@ -214,7 +230,19 @@ export default function CajaPage() {
         const k = `${p.anio}-${p.tipo}`; bal[k] = Number(p.monto); ids[k] = p.id
       })
       const seq = bachiMonthSequence()
-      const startIdx = Math.max(0, seq.findIndex(s => s.anio === anio && s.tipo === startTipo))
+      const selIdx = Math.max(0, seq.findIndex(s => s.anio === anio && s.tipo === startTipo))
+      let firstRecordIdx = seq.length
+      ;(existing ?? []).forEach(p => {
+        const idx = seq.findIndex(s => s.anio === p.anio && s.tipo === p.tipo)
+        if (idx >= 0 && idx < firstRecordIdx) firstRecordIdx = idx
+      })
+      const lowerBound = (existing && existing.length > 0) ? Math.min(firstRecordIdx, selIdx) : selIdx
+      let startIdx = lowerBound
+      while (startIdx < seq.length) {
+        const { anio: y, tipo } = seq[startIdx]
+        if ((bal[`${y}-${tipo}`] ?? 0) < LIMIT) break
+        startIdx++
+      }
       let remaining = montoBachi
       for (let i = startIdx; i < seq.length && remaining > 0; i++) {
         const { anio: y, tipo } = seq[i]
