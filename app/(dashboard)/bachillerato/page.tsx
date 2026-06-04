@@ -326,9 +326,8 @@ function BachiModal({ alumna, anio, tipo, existing, onSave, onClose }: {
 
   const handleSave = () => {
     if (estado === 'pendiente') { onSave(0, 'pendiente'); return }
-    const m = parseFloat(monto) || 0
-    if (!m) return
-    onSave(m, estado)
+    // Permite $0 + 'pagado' (para marcar meses anteriores al inicio del grupo)
+    onSave(parseFloat(monto) || 0, estado)
   }
 
   return (

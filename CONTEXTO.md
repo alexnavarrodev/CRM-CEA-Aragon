@@ -89,6 +89,22 @@ Sidebar en `components/Sidebar.tsx` → `components/DashboardShell.tsx` (drawer 
   - Ej: María paga $500 ambos → $250 col + $250 bachi. Si el mes de bachi tenía $750, sube a $1000 = **pagado**. Si solo llega a $250 = **parcial**.
 - Estado `parcial` si el mes < límite, `pagado` si llega al límite.
 - Lógica en `caja/page.tsx` → `handleAdd` → `upsertCol` / `upsertBachi` (usan `colMonthSequence` / `bachiMonthSequence`).
+- El saldo "ya pagado" de un mes se calcula por **estado**, no por monto:
+  `pagado`=límite lleno, `parcial`=su monto, `pendiente`=0 (aunque tenga monto placeholder).
+
+### Inicio de curso por grupo (NO meter pagos antes de esto)
+Cada grupo empezó en un mes distinto. Los pagos NUNCA deben caer en meses anteriores
+al inicio de su grupo, aunque esos meses estén vacíos.
+- **JMT** → Noviembre 2025
+- **VMX** → Enero 2026
+- **MML** → Febrero 2026
+- **SMX** → Febrero 2026
+- **VML** → Abril 2026
+- **SML** → Mayo 2026
+
+Mecanismo: los meses anteriores al inicio de cada grupo se marcan **$0 y "pagado"**
+(así la acumulación los salta — un mes 'pagado' se considera lleno y el barrido
+arranca en el primer mes real sin pagar a partir del inicio del curso).
 
 ### Margen (Panel y Caja)
 - El **margen NO incluye bachillerato** (no es beneficio propio de la escuela).
