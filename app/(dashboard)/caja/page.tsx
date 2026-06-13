@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Alumna, MovimientoCaja, MovimientoTipo, Canal, MESES } from '@/lib/types'
+import { mesToBachiTipo, planColegiatura, planBachillerato } from '@/lib/acumulacion'
 import {
   Plus, TrendingUp, TrendingDown, X, ArrowUpRight, ArrowDownRight,
   User, Trash2, Pencil, ChevronDown, ChevronUp, Tag, Check,
@@ -48,27 +49,7 @@ const BACHI_CONCEPTOS = [
   ...MESES.map(m => ({ key: m.toLowerCase(), label: m })),
 ]
 
-const mesToBachiTipo = (mes: number) => MESES[mes - 1].toLowerCase()
-
-// ─── Secuencias cronológicas de meses (Nov 2025 → Dic 2027) ──────────────────
-const TIPOS_BACHI = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
-
-function bachiMonthSequence(): { anio: number; tipo: string }[] {
-  const seq: { anio: number; tipo: string }[] = []
-  for (let anio = 2025; anio <= 2027; anio++) {
-    const start = anio === 2025 ? 10 : 0 // index 10 = 'nov'
-    for (let i = start; i < 12; i++) seq.push({ anio, tipo: TIPOS_BACHI[i] })
-  }
-  return seq
-}
-function colMonthSequence(): { anio: number; mes: number }[] {
-  const seq: { anio: number; mes: number }[] = []
-  for (let anio = 2025; anio <= 2027; anio++) {
-    const start = anio === 2025 ? 11 : 1
-    for (let m = start; m <= 12; m++) seq.push({ anio, mes: m })
-  }
-  return seq
-}
+// (mesToBachiTipo y las secuencias de meses ahora viven en lib/acumulacion.ts)
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type MovRow = MovimientoCaja & { alumna?: { nombre: string } | null }
@@ -166,54 +147,21 @@ export default function CajaPage() {
       if (al) colLimit = al.programa === 'ambos' ? 1000 : Number(al.cuota_mensual) || 1000
     }
 
-    // ── Acumula un pago de colegiatura llenando meses de a poco (límite por mes) ──
+    // ── Acumula un pago de colegiatura (usa el planificador puro de lib/acumulacion) ──
     const upsertCol = async (montoCol: number) => {
       if (!alumna_id || !mes || montoCol <= 0) return
       const { data: existing } = await supabase
         .from('pagos_colegiaturas').select('id, anio, mes, monto, estado')
         .eq('alumna_id', alumna_id)
-      const bal: Record<string, number> = {}
-      const ids: Record<string, string> = {}
-      ;(existing ?? []).forEach(p => {
-        // Saldo ya PAGADO: 'pagado' = lleno, 'parcial' = su monto, 'pendiente' = 0 (aunque tenga monto placeholder)
-        const pagado = p.estado === 'pagado' ? colLimit : p.estado === 'parcial' ? Number(p.monto) : 0
-        const k = `${p.anio}-${p.mes}`; bal[k] = pagado; ids[k] = p.id
-      })
-      const seq = colMonthSequence()
-      // Mes seleccionado en el modal
-      const selIdx = Math.max(0, seq.findIndex(s => s.anio === anio && s.mes === mes))
-      // Primer mes con algún registro de la alumna
-      let firstRecordIdx = seq.length
-      ;(existing ?? []).forEach(p => {
-        const idx = seq.findIndex(s => s.anio === p.anio && s.mes === p.mes)
-        if (idx >= 0 && idx < firstRecordIdx) firstRecordIdx = idx
-      })
-      // Punto de partida del barrido: el más temprano entre su primer registro y el mes elegido
-      const lowerBound = (existing && existing.length > 0) ? Math.min(firstRecordIdx, selIdx) : selIdx
-      // Avanzar hasta el primer mes que NO esté pagado completo (el más antiguo pendiente)
-      let startIdx = lowerBound
-      while (startIdx < seq.length) {
-        const { anio: y, mes: m } = seq[startIdx]
-        if ((bal[`${y}-${m}`] ?? 0) < colLimit) break
-        startIdx++
-      }
-      let remaining = montoCol
-      for (let i = startIdx; i < seq.length && remaining > 0; i++) {
-        const { anio: y, mes: m } = seq[i]
-        const k = `${y}-${m}`
-        const current = bal[k] ?? 0
-        if (current >= colLimit) continue
-        const add = Math.min(colLimit - current, remaining)
-        const newBal = current + add
-        remaining -= add
-        const estado = newBal >= colLimit ? 'pagado' : 'parcial'
-        if (ids[k]) {
+      const plan = planColegiatura(existing ?? [], montoCol, anio, mes, colLimit)
+      for (const w of plan) {
+        if (w.id) {
           await supabase.from('pagos_colegiaturas')
-            .update({ monto: newBal, estado, fecha_pago: payload.fecha }).eq('id', ids[k])
+            .update({ monto: w.monto, estado: w.estado, fecha_pago: payload.fecha }).eq('id', w.id)
         } else {
           await supabase.from('pagos_colegiaturas').insert({
-            user_id: user.id, alumna_id, anio: y, mes: m,
-            monto: newBal, estado, fecha_pago: payload.fecha,
+            user_id: user.id, alumna_id, anio: w.anio, mes: w.mes,
+            monto: w.monto, estado: w.estado, fecha_pago: payload.fecha,
           })
         }
       }
@@ -222,47 +170,18 @@ export default function CajaPage() {
     // ── Acumula un pago de bachillerato (límite 1000 por mes) ────────────────────
     const upsertBachi = async (montoBachi: number, startTipo: string) => {
       if (!alumna_id || !startTipo || montoBachi <= 0) return
-      const LIMIT = 1000
       const { data: existing } = await supabase
         .from('pagos_bachillerato').select('id, anio, tipo, monto, estado')
         .eq('alumna_id', alumna_id)
-      const bal: Record<string, number> = {}
-      const ids: Record<string, string> = {}
-      ;(existing ?? []).forEach(p => {
-        const pagado = p.estado === 'pagado' ? LIMIT : p.estado === 'parcial' ? Number(p.monto) : 0
-        const k = `${p.anio}-${p.tipo}`; bal[k] = pagado; ids[k] = p.id
-      })
-      const seq = bachiMonthSequence()
-      const selIdx = Math.max(0, seq.findIndex(s => s.anio === anio && s.tipo === startTipo))
-      let firstRecordIdx = seq.length
-      ;(existing ?? []).forEach(p => {
-        const idx = seq.findIndex(s => s.anio === p.anio && s.tipo === p.tipo)
-        if (idx >= 0 && idx < firstRecordIdx) firstRecordIdx = idx
-      })
-      const lowerBound = (existing && existing.length > 0) ? Math.min(firstRecordIdx, selIdx) : selIdx
-      let startIdx = lowerBound
-      while (startIdx < seq.length) {
-        const { anio: y, tipo } = seq[startIdx]
-        if ((bal[`${y}-${tipo}`] ?? 0) < LIMIT) break
-        startIdx++
-      }
-      let remaining = montoBachi
-      for (let i = startIdx; i < seq.length && remaining > 0; i++) {
-        const { anio: y, tipo } = seq[i]
-        const k = `${y}-${tipo}`
-        const current = bal[k] ?? 0
-        if (current >= LIMIT) continue
-        const add = Math.min(LIMIT - current, remaining)
-        const newBal = current + add
-        remaining -= add
-        const estado = newBal >= LIMIT ? 'pagado' : 'parcial'
-        if (ids[k]) {
+      const plan = planBachillerato(existing ?? [], montoBachi, anio, startTipo, 1000)
+      for (const w of plan) {
+        if (w.id) {
           await supabase.from('pagos_bachillerato')
-            .update({ monto: newBal, estado, fecha_pago: payload.fecha }).eq('id', ids[k])
+            .update({ monto: w.monto, estado: w.estado, fecha_pago: payload.fecha }).eq('id', w.id)
         } else {
           await supabase.from('pagos_bachillerato').insert({
-            user_id: user.id, alumna_id, anio: y, tipo,
-            monto: newBal, estado, fecha_pago: payload.fecha,
+            user_id: user.id, alumna_id, anio: w.anio, tipo: w.tipo,
+            monto: w.monto, estado: w.estado, fecha_pago: payload.fecha,
           })
         }
       }
