@@ -56,6 +56,19 @@ netlify deploy --build --prod
 - `robocopy` devuelve exit code 1-3 en éxito (no es error).
 - La carpeta de deploy debe estar sin espacios (Netlify CLI lo exige en Windows).
 
+## Versiones — V1 (estable) / V2 (módulo de pagos)
+
+Para poder volver a la versión anterior si el módulo de pagos no convence:
+- **V1** = versión estable ANTES del módulo de pagos. Congelada en git:
+  - Aragón: rama `v1` y tag `v1.0` (commit `e1de2c2`).
+  - Atenea: rama `v1` y tag `v1.0` (commit `dc6cb28`).
+- **V2** = `main` (rama activa actual). Incluye el refactor `lib/acumulacion.ts` y todo
+  lo que se construya del módulo de pagos en línea (ver `modulo-pagos.md`).
+
+**Volver a V1** (si hiciera falta): redeploy desde la rama `v1` (no borra V2; V2 sigue en
+`main`). Para inspeccionar V1 sin perder V2: `git checkout v1` (y `git checkout main` para volver).
+No mezclar trabajo de pagos en la rama `v1`: esa rama queda intacta como punto de retorno.
+
 ## Estructura de páginas (`app/(dashboard)/`)
 
 Sidebar en `components/Sidebar.tsx` → `components/DashboardShell.tsx` (drawer móvil responsive).
