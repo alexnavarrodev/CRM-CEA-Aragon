@@ -148,3 +148,45 @@ export function planBachillerato(
   return computePlan(seq, byKey, monto, `${startAnio}-${startTipo}`, limit)
     .map(w => ({ id: w.id, anio: w.item.anio, tipo: w.item.tipo, monto: w.monto, estado: w.estado }))
 }
+
+// ── Cálculo de ADEUDO (meses pendientes hasta una fecha de corte) ────────────
+// Usado por la página pública /pagar/[token] y la cobranza. Puro.
+
+export interface MesAdeudado { anio: number; mes?: number; tipo?: string; falta: number }
+
+/** Meses de colegiatura con saldo pendiente, desde el primer registro de la alumna
+ *  hasta el mes de corte (inclusive). Los meses 'pagado' (incl. $0 pre-inicio) no cuentan. */
+export function mesesAdeudadosCol(existing: PagoExistente[], limit: number, hastaAnio: number, hastaMes: number): MesAdeudado[] {
+  const seq = colMonthSequence()
+  const byKey: Record<string, number> = {}
+  for (const p of existing) { if (p.mes != null) byKey[`${p.anio}-${p.mes}`] = saldoPagado(p.estado, p.monto, limit) }
+  if (Object.keys(byKey).length === 0) return []
+  let firstIdx = seq.length
+  seq.forEach((s, i) => { if (byKey[s.key] !== undefined && i < firstIdx) firstIdx = i })
+  let cutoff = seq.findIndex(s => s.anio === hastaAnio && s.mes === hastaMes)
+  if (cutoff < 0) cutoff = seq.length - 1
+  const out: MesAdeudado[] = []
+  for (let i = firstIdx; i <= cutoff; i++) {
+    const paid = byKey[seq[i].key] ?? 0
+    if (paid < limit) out.push({ anio: seq[i].anio, mes: seq[i].mes, falta: limit - paid })
+  }
+  return out
+}
+
+/** Igual pero para bachillerato (límite 1000, corte por tipo de mes). */
+export function mesesAdeudadosBachi(existing: PagoExistente[], limit: number, hastaAnio: number, hastaTipo: string): MesAdeudado[] {
+  const seq = bachiMonthSequence()
+  const byKey: Record<string, number> = {}
+  for (const p of existing) { if (p.tipo) byKey[`${p.anio}-${p.tipo}`] = saldoPagado(p.estado, p.monto, limit) }
+  if (Object.keys(byKey).length === 0) return []
+  let firstIdx = seq.length
+  seq.forEach((s, i) => { if (byKey[s.key] !== undefined && i < firstIdx) firstIdx = i })
+  let cutoff = seq.findIndex(s => s.anio === hastaAnio && s.tipo === hastaTipo)
+  if (cutoff < 0) cutoff = seq.length - 1
+  const out: MesAdeudado[] = []
+  for (let i = firstIdx; i <= cutoff; i++) {
+    const paid = byKey[seq[i].key] ?? 0
+    if (paid < limit) out.push({ anio: seq[i].anio, tipo: seq[i].tipo, falta: limit - paid })
+  }
+  return out
+}
