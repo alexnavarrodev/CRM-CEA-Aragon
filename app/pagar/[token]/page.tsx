@@ -149,11 +149,11 @@ function Shell({ children }: { children: React.ReactNode }) {
       <div className="w-full max-w-sm">
         {/* Marca */}
         <div className="flex items-center justify-center gap-2 mb-8">
-          <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-sm text-white">
-            FN
+          <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-[11px] text-white">
+            CEA
           </div>
           <div className="leading-tight">
-            <p className="text-white font-semibold text-sm">Florencia Nightingale</p>
+            <p className="text-white font-semibold text-sm">CEA Aragón</p>
             <p className="text-white/40 text-[11px]">Escuela de Enfermería</p>
           </div>
         </div>

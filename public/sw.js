@@ -1,4 +1,4 @@
-// CRM Florencia Nightingale — Service Worker
+// CRM CEA Aragón — Service Worker
 const CACHE = 'crm-fn-v1'
 
 self.addEventListener('install', () => {

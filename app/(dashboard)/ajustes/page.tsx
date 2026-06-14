@@ -21,7 +21,7 @@ export default function AjustesPage() {
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Nombre de la escuela</label>
                   <input
-                    defaultValue="Florencia Nightingale — Escuela de Enfermería"
+                    defaultValue="CEA Aragón — Escuela de Enfermería"
                     readOnly
                     className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-500"
                   />

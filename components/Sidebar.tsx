@@ -71,10 +71,10 @@ export default function Sidebar({ userEmail, userName, onClose }: SidebarProps) 
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm text-white flex-shrink-0"
                style={{ background: '#2563EB' }}>
-            FN
+            CEA
           </div>
           <div>
-            <p className="text-white font-semibold text-sm leading-tight">Florencia Nightingale</p>
+            <p className="text-white font-semibold text-sm leading-tight">CEA Aragón</p>
             <p className="text-white/40 text-xs">Escuela de Enfermería</p>
           </div>
         </div>

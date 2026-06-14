@@ -3,13 +3,13 @@ import Script from "next/script";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "CRM Florencia",
-  description: "CRM profesional para gestión de la Escuela de Enfermería Florencia Nightingale",
+  title: "CRM CEA Aragón",
+  description: "CRM profesional para gestión de la Escuela de Enfermería CEA Aragón",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "CRM FN",
+    title: "CEA Aragón",
   },
 };
 

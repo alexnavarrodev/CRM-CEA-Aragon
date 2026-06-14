@@ -1,7 +1,7 @@
 {
-  "name": "CRM Florencia Nightingale",
-  "short_name": "CRM FN",
-  "description": "Gestión de la Escuela de Enfermería Florencia Nightingale",
+  "name": "CRM CEA Aragón",
+  "short_name": "CEA Aragón",
+  "description": "Gestión de la Escuela de Enfermería CEA Aragón",
   "start_url": "/voz",
   "scope": "/",
   "display": "standalone",

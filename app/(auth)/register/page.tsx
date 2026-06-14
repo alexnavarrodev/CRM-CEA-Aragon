@@ -43,7 +43,7 @@ export default function RegisterPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
         </div>
-        <h1 className="text-2xl font-bold text-white">CRM Florencia</h1>
+        <h1 className="text-2xl font-bold text-white">CRM CEA Aragón</h1>
         <p className="text-white/60 text-sm mt-1">Crea tu cuenta</p>
       </div>
 
