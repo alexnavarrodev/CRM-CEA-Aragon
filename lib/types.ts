@@ -43,6 +43,7 @@ export interface Alumna {
   status: AlumnaStatus
   programa: AlumnaPrograma
   notas: string | null
+  pago_token?: string | null
   created_at: string
   updated_at: string
   grupo?: Grupo

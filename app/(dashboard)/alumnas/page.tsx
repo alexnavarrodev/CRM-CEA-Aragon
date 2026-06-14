@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Alumna, Grupo, AlumnaStatus, AlumnaPrograma, DIA_COLORS } from '@/lib/types'
-import { Plus, X, Users, Phone, Mail, Search } from 'lucide-react'
+import { Plus, X, Users, Phone, Mail, Search, Link2, Check } from 'lucide-react'
 
 const STATUS_STYLES: Record<AlumnaStatus, { label: string; className: string }> = {
   activa:   { label: 'Activa',   className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
@@ -25,7 +25,17 @@ export default function AlumnasPage() {
   const [busqueda, setBusqueda] = useState('')
   const [modal, setModal] = useState<Alumna | null | 'new'>(null)
   const [loading, setLoading] = useState(true)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
   const supabase = createClient()
+
+  const copiarEnlace = (alumna: Alumna) => {
+    if (!alumna.pago_token) return
+    const url = `${window.location.origin}/pagar/${alumna.pago_token}`
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedId(alumna.id)
+      setTimeout(() => setCopiedId(null), 1600)
+    })
+  }
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -143,7 +153,7 @@ export default function AlumnasPage() {
                   <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">PROMEDIO</th>
                   <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">ASISTENCIA</th>
                   <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">ESTADO</th>
-                  <th className="px-3 py-3 w-10" />
+                  <th className="px-3 py-3 w-20" />
                 </tr>
               </thead>
               <tbody>
@@ -194,9 +204,18 @@ export default function AlumnasPage() {
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${st.className}`}>{st.label}</span>
                       </td>
                       <td className="px-3 py-3.5" onClick={e => e.stopPropagation()}>
-                        <button onClick={() => setModal(alumna)} className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition">
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => copiarEnlace(alumna)}
+                            title="Copiar enlace de pago"
+                            className={`p-1.5 rounded-lg transition ${copiedId === alumna.id ? 'text-emerald-600 bg-emerald-50' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`}
+                          >
+                            {copiedId === alumna.id ? <Check className="w-4 h-4" /> : <Link2 className="w-4 h-4" />}
+                          </button>
+                          <button onClick={() => setModal(alumna)} title="Editar" className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition">
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )
