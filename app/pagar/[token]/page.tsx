@@ -8,6 +8,7 @@ import {
   mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, TIPOS_BACHI,
   type MesAdeudado,
 } from '@/lib/acumulacion'
+import BotonPagar from './BotonPagar'
 
 export const dynamic = 'force-dynamic' // siempre calcular en vivo
 
@@ -30,8 +31,12 @@ function mesLabelBachi(m: MesAdeudado) {
   return `${MESES_FULL[idx]} ${m.anio} (bach.)`
 }
 
-export default async function PagarPage({ params }: { params: Promise<{ token: string }> }) {
+export default async function PagarPage({ params, searchParams }: {
+  params: Promise<{ token: string }>
+  searchParams: Promise<{ pago?: string }>
+}) {
   const { token } = await params
+  const { pago } = await searchParams
 
   // Fecha de corte = mes actual (hora de México, UTC-6)
   const now = new Date(Date.now() - 6 * 3600 * 1000)
@@ -93,6 +98,20 @@ export default async function PagarPage({ params }: { params: Promise<{ token: s
         <h1 className="text-2xl font-bold text-white">{alumna.nombre}</h1>
       </div>
 
+      {/* Banner al volver del pago */}
+      {pago === 'ok' && (
+        <div className="rounded-xl bg-emerald-500/15 border border-emerald-400/30 px-4 py-3 mb-4 text-center">
+          <p className="text-emerald-300 text-sm font-medium">¡Pago recibido! 🎉</p>
+          <p className="text-white/50 text-xs mt-0.5">Puede tardar 1-2 minutos en reflejarse aquí.</p>
+        </div>
+      )}
+      {pago === 'pend' && (
+        <div className="rounded-xl bg-amber-500/15 border border-amber-400/30 px-4 py-3 mb-4 text-center">
+          <p className="text-amber-300 text-sm font-medium">Pago en proceso</p>
+          <p className="text-white/50 text-xs mt-0.5">Si pagaste por SPEI, puede tardar unos minutos.</p>
+        </div>
+      )}
+
       {alCorriente ? (
         <div className="rounded-2xl bg-emerald-500/15 border border-emerald-400/30 p-8 text-center">
           <p className="text-5xl mb-3">✅</p>
@@ -128,14 +147,8 @@ export default async function PagarPage({ params }: { params: Promise<{ token: s
             </ul>
           </div>
 
-          {/* Pago en línea — próximamente (paso 3) */}
-          <div className="rounded-2xl bg-blue-500/10 border border-blue-400/25 p-4 text-center">
-            <p className="text-blue-200 text-sm font-medium mb-1">💳 Pago en línea muy pronto</p>
-            <p className="text-white/50 text-xs leading-relaxed">
-              Por ahora paga en el despacho o por transferencia. En breve podrás pagar
-              aquí mismo con SPEI o tarjeta.
-            </p>
-          </div>
+          {/* Pago en línea */}
+          <BotonPagar token={token} />
         </>
       )}
     </Shell>
