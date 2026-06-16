@@ -90,4 +90,41 @@ export async function aplicarPagoAlumna(
     fecha,
     alumna_id: alumna.id,
   })
+
+  return { categoria }
+}
+
+// ── Aviso por correo de pago recibido (Resend). No bloquea si falla. ─────────
+export async function enviarAvisoPago(opts: {
+  nombre: string; monto: number; categoria: string; canal: string
+}) {
+  const apiKey = process.env.RESEND_API_KEY
+  const to = process.env.NOTIFY_EMAIL
+  if (!apiKey || !to) return // aún no configurado
+
+  const catLabel =
+    opts.categoria === 'ambos' ? 'Colegiatura + Bachillerato' :
+    opts.categoria === 'colegiatura' ? 'Colegiatura' :
+    opts.categoria === 'bachillerato' ? 'Bachillerato' : opts.categoria
+  const monto = `$${Math.round(opts.monto).toLocaleString('es-MX')}`
+
+  try {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'CEA Aragón <onboarding@resend.dev>',
+        to: [to],
+        subject: `💰 Pago recibido: ${opts.nombre} — ${monto}`,
+        html: `<div style="font-family:system-ui,sans-serif;max-width:480px">
+          <h2 style="margin:0 0 8px">Pago en línea recibido</h2>
+          <p style="font-size:16px;margin:0 0 4px"><b>${opts.nombre}</b> pagó <b>${monto}</b></p>
+          <p style="color:#475569;margin:0 0 12px">${catLabel} · ${opts.canal}</p>
+          <p style="color:#94a3b8;font-size:13px">Ya quedó registrado automáticamente en Caja y en la colegiatura del CRM.</p>
+        </div>`,
+      }),
+    })
+  } catch (e) {
+    console.error('Resend error', e)
+  }
 }

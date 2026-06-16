@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
-import { aplicarPagoAlumna } from '@/lib/pagos-server'
+import { aplicarPagoAlumna, enviarAvisoPago } from '@/lib/pagos-server'
 
 function admin() {
   return createClient(
@@ -102,7 +102,10 @@ export async function POST(req: NextRequest) {
   }
 
   // Aplicar el pago (Caja + Colegiatura/Bachillerato)
-  await aplicarPagoAlumna(supabase, alumna, monto, canal, fecha)
+  const res = await aplicarPagoAlumna(supabase, alumna, monto, canal, fecha)
+
+  // Aviso por correo (si está configurado RESEND_API_KEY + NOTIFY_EMAIL)
+  await enviarAvisoPago({ nombre: alumna.nombre, monto, categoria: res?.categoria ?? '', canal })
 
   return NextResponse.json({ ok: true })
 }
