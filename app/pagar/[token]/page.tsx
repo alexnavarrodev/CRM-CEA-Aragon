@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js'
 import { MESES_FULL } from '@/lib/types'
 import {
   mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, TIPOS_BACHI,
+  aplicaDescuentoProntoPago, PRONTO_PAGO_MONTO, PRONTO_PAGO_DIA_LIMITE,
   type MesAdeudado,
 } from '@/lib/acumulacion'
 import BotonPagar from './BotonPagar'
@@ -42,6 +43,7 @@ export default async function PagarPage({ params, searchParams }: {
   const now = new Date(Date.now() - 6 * 3600 * 1000)
   const hoyAnio = now.getUTCFullYear()
   const hoyMes = now.getUTCMonth() + 1
+  const hoyDia = now.getUTCDate()
 
   const supabase = adminClient()
 
@@ -84,9 +86,14 @@ export default async function PagarPage({ params, searchParams }: {
     adeudoBachi = mesesAdeudadosBachi(data ?? [], 1000, hoyAnio, mesToBachiTipo(hoyMes))
   }
 
-  const total =
+  const totalBruto =
     adeudoCol.reduce((s, m) => s + m.falta, 0) +
     adeudoBachi.reduce((s, m) => s + m.falta, 0)
+
+  // Descuento por pronto pago (mismo criterio que checkout y webhook)
+  const descuento = aplicaDescuentoProntoPago(alumna.programa, hoyDia, adeudoCol, hoyAnio, hoyMes, colLimit)
+    ? PRONTO_PAGO_MONTO : 0
+  const total = Math.max(0, totalBruto - descuento)
 
   const alCorriente = total <= 0
 
@@ -122,9 +129,21 @@ export default async function PagarPage({ params, searchParams }: {
         <>
           {/* Total */}
           <div className="rounded-2xl bg-white/8 border border-white/10 p-6 text-center mb-4">
-            <p className="text-white/50 text-xs uppercase tracking-widest mb-1">Adeudo total</p>
+            <p className="text-white/50 text-xs uppercase tracking-widest mb-1">
+              {descuento > 0 ? 'Hoy pagas' : 'Adeudo total'}
+            </p>
+            {descuento > 0 && (
+              <p className="text-white/40 text-lg line-through tabular-nums">{fmt(totalBruto)}</p>
+            )}
             <p className="text-4xl font-bold text-white tabular-nums">{fmt(total)}</p>
           </div>
+
+          {descuento > 0 && (
+            <div className="rounded-xl bg-emerald-500/15 border border-emerald-400/30 px-4 py-3 mb-4 text-center">
+              <p className="text-emerald-300 text-sm font-semibold">🎉 Ahorras {fmt(descuento)} por pronto pago</p>
+              <p className="text-white/50 text-xs mt-0.5">Pagando antes del día {PRONTO_PAGO_DIA_LIMITE} del mes.</p>
+            </div>
+          )}
 
           {/* Desglose */}
           <div className="rounded-2xl bg-white/8 border border-white/10 overflow-hidden mb-5">

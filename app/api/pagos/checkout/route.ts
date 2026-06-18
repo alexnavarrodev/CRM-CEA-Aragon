@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo } from '@/lib/acumulacion'
+import { mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, aplicaDescuentoProntoPago, PRONTO_PAGO_MONTO } from '@/lib/acumulacion'
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL || 'https://crm-cea-aragon.netlify.app'
 
@@ -37,14 +37,21 @@ export async function POST(req: NextRequest) {
   const y = now.getUTCFullYear(), m = now.getUTCMonth() + 1
   const colLimit = alumna.programa === 'ambos' ? 1000 : (Number(alumna.cuota_mensual) || 1000)
   let total = 0
+  let adeudoCol: ReturnType<typeof mesesAdeudadosCol> = []
   if (alumna.programa === 'colegiaturas' || alumna.programa === 'ambos') {
     const { data } = await supabase.from('pagos_colegiaturas').select('id, anio, mes, monto, estado').eq('alumna_id', alumna.id)
-    total += mesesAdeudadosCol(data ?? [], colLimit, y, m).reduce((s, x) => s + x.falta, 0)
+    adeudoCol = mesesAdeudadosCol(data ?? [], colLimit, y, m)
+    total += adeudoCol.reduce((s, x) => s + x.falta, 0)
   }
   if (alumna.programa === 'bachillerato' || alumna.programa === 'ambos') {
     const { data } = await supabase.from('pagos_bachillerato').select('id, anio, tipo, monto, estado').eq('alumna_id', alumna.id)
     total += mesesAdeudadosBachi(data ?? [], 1000, y, mesToBachiTipo(m)).reduce((s, x) => s + x.falta, 0)
   }
+
+  // Descuento por pronto pago (mismo criterio que usa el webhook al aplicar)
+  const descuento = aplicaDescuentoProntoPago(alumna.programa, now.getUTCDate(), adeudoCol, y, m, colLimit)
+    ? PRONTO_PAGO_MONTO : 0
+  total = Math.max(0, total - descuento)
 
   if (total <= 0) return NextResponse.json({ error: 'La alumna está al corriente' }, { status: 400 })
 

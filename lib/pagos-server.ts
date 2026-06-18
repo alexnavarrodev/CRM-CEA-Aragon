@@ -3,7 +3,10 @@
 // cliente admin (service_role) que se le pasa. No usar en el cliente.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { planColegiatura, planBachillerato, mesToBachiTipo } from './acumulacion'
+import {
+  planColegiatura, planBachillerato, mesToBachiTipo,
+  mesesAdeudadosCol, aplicaDescuentoProntoPago, PRONTO_PAGO_MONTO,
+} from './acumulacion'
 
 interface AlumnaPago {
   id: string
@@ -25,6 +28,7 @@ export async function aplicarPagoAlumna(
   const now = new Date(Date.now() - 6 * 3600 * 1000) // hora de México
   const anio = now.getUTCFullYear()
   const mes = now.getUTCMonth() + 1
+  const diaHoy = now.getUTCDate()
 
   const esCol   = alumna.programa === 'colegiaturas' || alumna.programa === 'ambos'
   const esBachi = alumna.programa === 'bachillerato' || alumna.programa === 'ambos'
@@ -36,14 +40,23 @@ export async function aplicarPagoAlumna(
       .from('pagos_colegiaturas').select('id, anio, mes, monto, estado')
       .eq('alumna_id', alumna.id)
     const plan = planColegiatura(existing ?? [], m, anio, mes, colLimit)
+    // Descuento pronto pago: completar el mes actual aunque entren $50 menos
+    const adeudoCol = mesesAdeudadosCol(existing ?? [], colLimit, anio, mes)
+    const desc = aplicaDescuentoProntoPago(alumna.programa, diaHoy, adeudoCol, anio, mes, colLimit)
+      ? PRONTO_PAGO_MONTO : 0
     for (const w of plan) {
+      let estado = w.estado
+      if (desc > 0 && w.anio === anio && w.mes === mes && estado === 'parcial'
+          && (colLimit - w.monto) <= desc) {
+        estado = 'pagado' // el descuento completa el mes
+      }
       if (w.id) {
         await supabase.from('pagos_colegiaturas')
-          .update({ monto: w.monto, estado: w.estado, fecha_pago: fecha }).eq('id', w.id)
+          .update({ monto: w.monto, estado, fecha_pago: fecha }).eq('id', w.id)
       } else {
         await supabase.from('pagos_colegiaturas').insert({
           user_id: alumna.user_id, alumna_id: alumna.id, anio: w.anio, mes: w.mes,
-          monto: w.monto, estado: w.estado, fecha_pago: fecha,
+          monto: w.monto, estado, fecha_pago: fecha,
         })
       }
     }
