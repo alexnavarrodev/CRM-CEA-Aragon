@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
-import { aplicarPagoAlumna, enviarAvisoPago } from '@/lib/pagos-server'
+import { aplicarPagoAlumna, aplicarPagoExtra, enviarAvisoPago } from '@/lib/pagos-server'
 
 function admin() {
   return createClient(
@@ -77,8 +77,9 @@ export async function POST(req: NextRequest) {
     .from('pagos_online').select('id').eq('mp_payment_id', mpPaymentId).maybeSingle()
   if (yaExiste) return NextResponse.json({ ok: true, duplicado: true })
 
-  // Alumna por external_reference
-  const alumnaId = pago.external_reference
+  // external_reference = "<alumnaId>|<concepto>"  (concepto: mensualidad|uniforme|certificado)
+  const [alumnaId, conceptoRaw] = String(pago.external_reference || '').split('|')
+  const concepto = conceptoRaw || 'mensualidad'
   const { data: alumna } = await supabase
     .from('alumnas').select('id, user_id, nombre, programa, cuota_mensual')
     .eq('id', alumnaId).maybeSingle()
@@ -97,15 +98,21 @@ export async function POST(req: NextRequest) {
     monto, estado: 'approved', canal, raw: pago,
   })
   if (insErr) {
-    // Probablemente UNIQUE violation → ya se procesó en paralelo
     return NextResponse.json({ ok: true, duplicado: true })
   }
 
-  // Aplicar el pago (Caja + Colegiatura/Bachillerato)
-  const res = await aplicarPagoAlumna(supabase, alumna, monto, canal, fecha)
+  // Aplicar según el concepto
+  let categoria = 'mensualidad'
+  if (concepto === 'uniforme' || concepto === 'certificado') {
+    const res = await aplicarPagoExtra(supabase, alumna, concepto, monto, canal, fecha)
+    categoria = res.categoria
+  } else {
+    const res = await aplicarPagoAlumna(supabase, alumna, monto, canal, fecha)
+    categoria = res?.categoria ?? ''
+  }
 
   // Aviso por correo (si está configurado RESEND_API_KEY + NOTIFY_EMAIL)
-  await enviarAvisoPago({ nombre: alumna.nombre, monto, categoria: res?.categoria ?? '', canal })
+  await enviarAvisoPago({ nombre: alumna.nombre, monto, categoria, canal })
 
   return NextResponse.json({ ok: true })
 }

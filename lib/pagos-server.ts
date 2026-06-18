@@ -7,6 +7,7 @@ import {
   planColegiatura, planBachillerato, mesToBachiTipo,
   mesesAdeudadosCol, mesesAdeudadosBachi, aplicaDescuentoProntoPago, PRONTO_PAGO_MONTO,
 } from './acumulacion'
+import { EXTRA_TARGET, EXTRA_LABEL } from './extras'
 
 interface AlumnaPago {
   id: string
@@ -122,6 +123,36 @@ export async function aplicarPagoAlumna(
   })
 
   return { categoria }
+}
+
+/** Aplica un pago de Uniforme o Certificado: acumula en pagos_extras (tope en target)
+ *  e inserta el movimiento en caja con esa categoría. */
+export async function aplicarPagoExtra(
+  supabase: SupabaseClient,
+  alumna: AlumnaPago,
+  concepto: 'uniforme' | 'certificado',
+  monto: number,
+  canal: string,
+  fecha: string,
+) {
+  const target = EXTRA_TARGET[concepto]
+  const { data: ex } = await supabase.from('pagos_extras')
+    .select('id, monto').eq('alumna_id', alumna.id).eq('concepto', concepto).maybeSingle()
+  const nuevo = Math.min(target, (ex ? Number(ex.monto) : 0) + monto)
+  const estado = nuevo >= target ? 'pagado' : 'parcial'
+  if (ex) {
+    await supabase.from('pagos_extras').update({ monto: nuevo, estado, fecha_pago: fecha }).eq('id', ex.id)
+  } else {
+    await supabase.from('pagos_extras').insert({
+      user_id: alumna.user_id, alumna_id: alumna.id, concepto, monto: nuevo, estado, fecha_pago: fecha,
+    })
+  }
+  await supabase.from('movimientos_caja').insert({
+    user_id: alumna.user_id, tipo: 'ingreso',
+    concepto: `Pago en línea ${EXTRA_LABEL[concepto]} — ${alumna.nombre}`,
+    monto, canal, categoria: concepto, fecha, alumna_id: alumna.id,
+  })
+  return { categoria: concepto }
 }
 
 // ── Aviso por correo de pago recibido (Resend). No bloquea si falla. ─────────

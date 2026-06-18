@@ -1,6 +1,6 @@
 // Página pública de pago por alumna — SIN login.
-// Lee la alumna por su token (server-side con service_role; nunca se expone al cliente)
-// y calcula su adeudo en vivo reutilizando lib/acumulacion.ts.
+// Lee la alumna por su token (server-side con service_role) y muestra su adeudo
+// SEPARADO en Mensualidad, Uniforme y Certificado, cada uno con su botón de pago.
 
 import { createClient } from '@supabase/supabase-js'
 import { MESES_FULL } from '@/lib/types'
@@ -9,13 +9,16 @@ import {
   aplicaDescuentoProntoPago, PRONTO_PAGO_MONTO, PRONTO_PAGO_DIA_LIMITE,
   type MesAdeudado,
 } from '@/lib/acumulacion'
+import {
+  EXTRA_TARGET, estadoExtra, mesesTranscurridos,
+  UNIFORME_MESES_LIMITE, CERTIFICADO_MES_LIMITE,
+} from '@/lib/extras'
 import BotonPagar from './BotonPagar'
 
-export const dynamic = 'force-dynamic' // siempre calcular en vivo
+export const dynamic = 'force-dynamic'
 
 const fmt = (n: number) => `$${Math.round(n).toLocaleString('es-MX')}`
 
-// Cliente admin (solo servidor). La service key vive en variable de entorno del servidor.
 function adminClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -24,12 +27,17 @@ function adminClient() {
   )
 }
 
-function mesLabelCol(m: MesAdeudado) {
-  return `${MESES_FULL[(m.mes ?? 1) - 1]} ${m.anio}`
-}
-function mesLabelBachi(m: MesAdeudado) {
+const mesLabelCol = (m: MesAdeudado) => `${MESES_FULL[(m.mes ?? 1) - 1]} ${m.anio}`
+const mesLabelBachi = (m: MesAdeudado) => {
   const idx = TIPOS_BACHI.indexOf((m.tipo ?? 'ene') as typeof TIPOS_BACHI[number])
   return `${MESES_FULL[idx]} ${m.anio} (bach.)`
+}
+// Mes de vencimiento = inicio + offset (uniforme offset 1 = mes 2; certificado offset 7 = mes 8)
+function venceLabel(startAnio: number, startMes: number, offset: number) {
+  const i = (startMes - 1) + offset
+  const y = startAnio + Math.floor(i / 12)
+  const mm = ((i % 12) + 12) % 12
+  return `${MESES_FULL[mm]} ${y}`
 }
 
 export default async function PagarPage({ params, searchParams }: {
@@ -39,7 +47,6 @@ export default async function PagarPage({ params, searchParams }: {
   const { token } = await params
   const { pago } = await searchParams
 
-  // Fecha de corte = mes actual (hora de México, UTC-6)
   const now = new Date(Date.now() - 6 * 3600 * 1000)
   const hoyAnio = now.getUTCFullYear()
   const hoyMes = now.getUTCMonth() + 1
@@ -48,12 +55,9 @@ export default async function PagarPage({ params, searchParams }: {
   const supabase = adminClient()
 
   const { data: alumna } = await supabase
-    .from('alumnas')
-    .select('id, nombre, cuota_mensual, programa, status')
-    .eq('pago_token', token)
-    .maybeSingle()
+    .from('alumnas').select('id, nombre, cuota_mensual, programa, status')
+    .eq('pago_token', token).maybeSingle()
 
-  // Token inválido → no revelar nada
   if (!alumna) {
     return (
       <Shell>
@@ -70,42 +74,51 @@ export default async function PagarPage({ params, searchParams }: {
   const esBachi = alumna.programa === 'bachillerato' || alumna.programa === 'ambos'
   const colLimit = alumna.programa === 'ambos' ? 1000 : (Number(alumna.cuota_mensual) || 1000)
 
-  let adeudoCol: MesAdeudado[] = []
-  let adeudoBachi: MesAdeudado[] = []
-
+  let colRows: { anio: number; mes: number; monto: number; estado: string; id: string }[] = []
+  let bachiRows: { anio: number; tipo: string; monto: number; estado: string; id: string }[] = []
   if (esCol) {
-    const { data } = await supabase
-      .from('pagos_colegiaturas').select('id, anio, mes, monto, estado')
-      .eq('alumna_id', alumna.id)
-    adeudoCol = mesesAdeudadosCol(data ?? [], colLimit, hoyAnio, hoyMes)
+    const { data } = await supabase.from('pagos_colegiaturas').select('id, anio, mes, monto, estado').eq('alumna_id', alumna.id)
+    colRows = data ?? []
   }
   if (esBachi) {
-    const { data } = await supabase
-      .from('pagos_bachillerato').select('id, anio, tipo, monto, estado')
-      .eq('alumna_id', alumna.id)
-    adeudoBachi = mesesAdeudadosBachi(data ?? [], 1000, hoyAnio, mesToBachiTipo(hoyMes))
+    const { data } = await supabase.from('pagos_bachillerato').select('id, anio, tipo, monto, estado').eq('alumna_id', alumna.id)
+    bachiRows = data ?? []
   }
+  const { data: exrows } = await supabase.from('pagos_extras').select('concepto, monto').eq('alumna_id', alumna.id)
 
-  const totalBruto =
-    adeudoCol.reduce((s, m) => s + m.falta, 0) +
-    adeudoBachi.reduce((s, m) => s + m.falta, 0)
+  // ── Mensualidad ──
+  const adeudoCol = mesesAdeudadosCol(colRows, colLimit, hoyAnio, hoyMes)
+  const adeudoBachi = mesesAdeudadosBachi(bachiRows, 1000, hoyAnio, mesToBachiTipo(hoyMes))
+  const mensBruto = adeudoCol.reduce((s, m) => s + m.falta, 0) + adeudoBachi.reduce((s, m) => s + m.falta, 0)
+  const descuento = aplicaDescuentoProntoPago(alumna.programa, hoyDia, adeudoCol, hoyAnio, hoyMes, colLimit) ? PRONTO_PAGO_MONTO : 0
+  const mensTotal = Math.max(0, mensBruto - descuento)
 
-  // Descuento por pronto pago (mismo criterio que checkout y webhook)
-  const descuento = aplicaDescuentoProntoPago(alumna.programa, hoyDia, adeudoCol, hoyAnio, hoyMes, colLimit)
-    ? PRONTO_PAGO_MONTO : 0
-  const total = Math.max(0, totalBruto - descuento)
+  // ── Inicio de curso (mes más antiguo con registro) → vencimientos ──
+  let start: { anio: number; mes: number } | null = null
+  for (const p of colRows) if (!start || (p.anio * 12 + p.mes) < (start.anio * 12 + start.mes)) start = { anio: p.anio, mes: p.mes }
+  for (const p of bachiRows) {
+    const mm = TIPOS_BACHI.indexOf(p.tipo as typeof TIPOS_BACHI[number]) + 1
+    if (mm > 0 && (!start || (p.anio * 12 + mm) < (start.anio * 12 + start.mes))) start = { anio: p.anio, mes: mm }
+  }
+  const elapsed = start ? mesesTranscurridos(start.anio, start.mes, hoyAnio, hoyMes) : null
 
-  const alCorriente = total <= 0
+  // ── Uniforme y Certificado ──
+  const uniPaid = Number(exrows?.find(p => p.concepto === 'uniforme')?.monto ?? 0)
+  const certPaid = Number(exrows?.find(p => p.concepto === 'certificado')?.monto ?? 0)
+  const stUni = estadoExtra('uniforme', uniPaid, elapsed)
+  const stCert = estadoExtra('certificado', certPaid, elapsed)
+  const uniVence = start ? venceLabel(start.anio, start.mes, UNIFORME_MESES_LIMITE - 1) : null
+  const certVence = start ? venceLabel(start.anio, start.mes, CERTIFICADO_MES_LIMITE - 1) : null
+
+  const todoAlCorriente = mensTotal <= 0 && stUni.completo && stCert.completo
 
   return (
     <Shell>
-      {/* Saludo */}
       <div className="text-center mb-6">
         <p className="text-white/40 text-xs uppercase tracking-widest mb-1">Estado de cuenta</p>
         <h1 className="text-2xl font-bold text-white">{alumna.nombre}</h1>
       </div>
 
-      {/* Banner al volver del pago */}
       {pago === 'ok' && (
         <div className="rounded-xl bg-emerald-500/15 border border-emerald-400/30 px-4 py-3 mb-4 text-center">
           <p className="text-emerald-300 text-sm font-medium">¡Pago recibido! 🎉</p>
@@ -119,67 +132,115 @@ export default async function PagarPage({ params, searchParams }: {
         </div>
       )}
 
-      {alCorriente ? (
+      {todoAlCorriente ? (
         <div className="rounded-2xl bg-emerald-500/15 border border-emerald-400/30 p-8 text-center">
           <p className="text-5xl mb-3">✅</p>
           <p className="text-emerald-300 font-semibold text-lg">Estás al corriente</p>
           <p className="text-white/50 text-sm mt-1">No tienes pagos pendientes. ¡Gracias!</p>
         </div>
       ) : (
-        <>
-          {/* Total */}
-          <div className="rounded-2xl bg-white/8 border border-white/10 p-6 text-center mb-4">
-            <p className="text-white/50 text-xs uppercase tracking-widest mb-1">
-              {descuento > 0 ? 'Hoy pagas' : 'Adeudo total'}
-            </p>
-            {descuento > 0 && (
-              <p className="text-white/40 text-lg line-through tabular-nums">{fmt(totalBruto)}</p>
-            )}
-            <p className="text-4xl font-bold text-white tabular-nums">{fmt(total)}</p>
-          </div>
+        <div className="space-y-4">
 
-          {descuento > 0 && (
-            <div className="rounded-xl bg-emerald-500/15 border border-emerald-400/30 px-4 py-3 mb-4 text-center">
-              <p className="text-emerald-300 text-sm font-semibold">🎉 Ahorras {fmt(descuento)} por pronto pago</p>
-              <p className="text-white/50 text-xs mt-0.5">Pagando antes del día {PRONTO_PAGO_DIA_LIMITE} del mes.</p>
-            </div>
+          {/* ── MENSUALIDAD ── */}
+          {mensTotal > 0 && (
+            <section className="rounded-2xl bg-white/8 border border-white/10 overflow-hidden">
+              <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+                <span className="text-sm font-semibold text-white">Mensualidad</span>
+                <span className="text-right">
+                  {descuento > 0 && <span className="text-white/40 text-xs line-through mr-1.5">{fmt(mensBruto)}</span>}
+                  <span className="text-white font-bold">{fmt(mensTotal)}</span>
+                </span>
+              </div>
+              <ul className="px-4 py-1">
+                {adeudoCol.map((m, i) => (
+                  <li key={'c' + i} className="flex items-center justify-between py-1.5 text-sm">
+                    <span className="text-white/70">{mesLabelCol(m)}</span>
+                    <span className="text-white/80 tabular-nums">{fmt(m.falta)}</span>
+                  </li>
+                ))}
+                {adeudoBachi.map((m, i) => (
+                  <li key={'b' + i} className="flex items-center justify-between py-1.5 text-sm">
+                    <span className="text-white/70">{mesLabelBachi(m)}</span>
+                    <span className="text-white/80 tabular-nums">{fmt(m.falta)}</span>
+                  </li>
+                ))}
+              </ul>
+              {descuento > 0 && (
+                <p className="px-4 pb-2 text-emerald-300 text-xs">🎉 Incluye −{fmt(descuento)} por pronto pago (antes del día {PRONTO_PAGO_DIA_LIMITE}).</p>
+              )}
+              <div className="p-3 pt-1">
+                <BotonPagar token={token} concepto="mensualidad" label={`💳 Pagar mensualidad · ${fmt(mensTotal)}`} />
+              </div>
+            </section>
           )}
 
-          {/* Desglose */}
-          <div className="rounded-2xl bg-white/8 border border-white/10 overflow-hidden mb-5">
-            <p className="px-4 py-2.5 text-xs font-semibold text-white/40 uppercase tracking-wider border-b border-white/10">
-              Meses pendientes
-            </p>
-            <ul>
-              {adeudoCol.map((m, i) => (
-                <li key={'c' + i} className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 last:border-0">
-                  <span className="text-white/80 text-sm">{mesLabelCol(m)}</span>
-                  <span className="text-white font-medium text-sm tabular-nums">{fmt(m.falta)}</span>
-                </li>
-              ))}
-              {adeudoBachi.map((m, i) => (
-                <li key={'b' + i} className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 last:border-0">
-                  <span className="text-white/80 text-sm">{mesLabelBachi(m)}</span>
-                  <span className="text-white font-medium text-sm tabular-nums">{fmt(m.falta)}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
+          {/* ── UNIFORME ── */}
+          <ConceptoCard
+            titulo="Uniforme" token={token} concepto="uniforme"
+            falta={stUni.falta} target={EXTRA_TARGET.uniforme} completo={stUni.completo}
+            vencido={stUni.vencido} vence={uniVence}
+          />
 
-          {/* Pago en línea */}
-          <BotonPagar token={token} />
-        </>
+          {/* ── CERTIFICADO ── */}
+          <ConceptoCard
+            titulo="Certificado" token={token} concepto="certificado"
+            falta={stCert.falta} target={EXTRA_TARGET.certificado} completo={stCert.completo}
+            vencido={stCert.vencido} vence={certVence}
+          />
+        </div>
       )}
     </Shell>
   )
 }
 
-// ── Marco visual (mobile-first, estilo de la app) ────────────────────────────
+// ── Tarjeta de concepto extra (uniforme / certificado) ───────────────────────
+function ConceptoCard({ titulo, token, concepto, falta, target, completo, vencido, vence }: {
+  titulo: string; token: string; concepto: 'uniforme' | 'certificado'
+  falta: number; target: number; completo: boolean; vencido: boolean; vence: string | null
+}) {
+  const pagado = target - falta
+  const pct = Math.min(100, Math.round((pagado / target) * 100))
+  if (completo) {
+    return (
+      <section className="rounded-2xl bg-emerald-500/10 border border-emerald-400/20 px-4 py-3 flex items-center justify-between">
+        <span className="text-sm font-semibold text-white">{titulo}</span>
+        <span className="text-emerald-300 text-sm font-medium">Liquidado ✓</span>
+      </section>
+    )
+  }
+  return (
+    <section className="rounded-2xl bg-white/8 border border-white/10 overflow-hidden">
+      <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+        <div>
+          <span className="text-sm font-semibold text-white">{titulo}</span>
+          {vence && (
+            <span className={`ml-2 text-[11px] px-1.5 py-0.5 rounded ${vencido ? 'bg-red-500/20 text-red-300' : 'bg-white/10 text-white/50'}`}>
+              {vencido ? 'Venció' : 'Vence'} {vence}
+            </span>
+          )}
+        </div>
+        <span className="text-white font-bold">{fmt(falta)}</span>
+      </div>
+      <div className="px-4 pt-3">
+        <div className="flex justify-between text-[11px] text-white/40 mb-1">
+          <span>Pagado {fmt(pagado)}</span><span>de {fmt(target)}</span>
+        </div>
+        <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+          <div className={`h-full rounded-full ${vencido ? 'bg-red-400' : 'bg-blue-500'}`} style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+      <div className="p-3">
+        <BotonPagar token={token} concepto={concepto} label={`💳 Pagar ${titulo.toLowerCase()} · ${fmt(falta)}`} />
+      </div>
+    </section>
+  )
+}
+
+// ── Marco visual ─────────────────────────────────────────────────────────────
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col items-center px-5 py-10">
       <div className="w-full max-w-sm">
-        {/* Marca */}
         <div className="flex items-center justify-center gap-2 mb-8">
           <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-[11px] text-white">
             CEA
