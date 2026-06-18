@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Alumna, MovimientoCaja, MovimientoTipo, Canal, MESES } from '@/lib/types'
 import { mesToBachiTipo, planColegiatura, planBachillerato } from '@/lib/acumulacion'
+import { EXTRA_TARGET } from '@/lib/extras'
 import {
   Plus, TrendingUp, TrendingDown, X, ArrowUpRight, ArrowDownRight,
   User, Trash2, Pencil, ChevronDown, ChevronUp, Tag, Check,
@@ -23,6 +24,7 @@ export const DEFAULT_CATEGORIAS: { key: string; label: string }[] = [
   { key: 'servicios',     label: 'Servicios' },
   { key: 'mantenimiento', label: 'Mantenimiento' },
   { key: 'uniforme',      label: 'Uniforme' },
+  { key: 'certificado',   label: 'Certificado' },
   { key: 'otros',         label: 'Otros' },
 ]
 
@@ -187,6 +189,25 @@ export default function CajaPage() {
       }
     }
 
+    // Acumula uniforme/certificado en pagos_extras (tope en su target)
+    const upsertExtra = async (concepto: 'uniforme' | 'certificado', montoPago: number) => {
+      if (!alumna_id || montoPago <= 0) return
+      const target = EXTRA_TARGET[concepto]
+      const { data: ex } = await supabase
+        .from('pagos_extras').select('id, monto')
+        .eq('alumna_id', alumna_id).eq('concepto', concepto).maybeSingle()
+      const nuevo = Math.min(target, (ex ? Number(ex.monto) : 0) + montoPago)
+      const estado = nuevo >= target ? 'pagado' : 'parcial'
+      if (ex) {
+        await supabase.from('pagos_extras')
+          .update({ monto: nuevo, estado, fecha_pago: payload.fecha }).eq('id', ex.id)
+      } else {
+        await supabase.from('pagos_extras').insert({
+          user_id: user.id, alumna_id, concepto, monto: nuevo, estado, fecha_pago: payload.fecha,
+        })
+      }
+    }
+
     if (alumna_id && payload.tipo === 'ingreso') {
       if (payload.categoria === 'colegiatura') await upsertCol(payload.monto)
       if (payload.categoria === 'bachillerato') await upsertBachi(payload.monto, tipoBachi)
@@ -195,6 +216,8 @@ export default function CajaPage() {
         await upsertCol(mitad)
         await upsertBachi(mitad, mesToBachiTipo(mes))
       }
+      if (payload.categoria === 'uniforme') await upsertExtra('uniforme', payload.monto)
+      if (payload.categoria === 'certificado') await upsertExtra('certificado', payload.monto)
     }
     setModal(false)
   }
@@ -759,17 +782,24 @@ function MovimientoModal({ categorias, onSave, onClose }: {
   const programa = alumna?.programa ?? null
 
   const categoriasDisponibles: { key: string; label: string }[] = (() => {
+    // Categorías "extra" (no col/bachi) + asegura uniforme y certificado siempre
+    const otras = () => {
+      const filt = categorias.filter(c => !['inscripcion','colegiatura','bachillerato','ambos'].includes(c.key))
+      for (const e of [{ key: 'uniforme', label: 'Uniforme' }, { key: 'certificado', label: 'Certificado' }])
+        if (!filt.some(c => c.key === e.key)) filt.push(e)
+      return filt
+    }
     if (tipo === 'egreso') return categorias.filter(c =>
       !['inscripcion','colegiatura','bachillerato','ambos'].includes(c.key)
     )
     if (!alumna) return categorias
-    if (programa === 'colegiaturas')  return [{ key: 'colegiatura', label: 'Colegiatura' }, ...categorias.filter(c => !['inscripcion','colegiatura','bachillerato','ambos'].includes(c.key))]
-    if (programa === 'bachillerato') return [{ key: 'bachillerato', label: 'Bachillerato' }, ...categorias.filter(c => !['inscripcion','colegiatura','bachillerato','ambos'].includes(c.key))]
+    if (programa === 'colegiaturas')  return [{ key: 'colegiatura', label: 'Colegiatura' }, ...otras()]
+    if (programa === 'bachillerato') return [{ key: 'bachillerato', label: 'Bachillerato' }, ...otras()]
     if (programa === 'ambos')        return [
       { key: 'ambos', label: 'Col. + Bachi ($÷2)' },
       { key: 'colegiatura', label: 'Solo Colegiatura' },
       { key: 'bachillerato', label: 'Solo Bachillerato' },
-      ...categorias.filter(c => !['inscripcion','colegiatura','bachillerato','ambos'].includes(c.key)),
+      ...otras(),
     ]
     return categorias
   })()

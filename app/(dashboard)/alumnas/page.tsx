@@ -3,7 +3,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Alumna, Grupo, AlumnaStatus, AlumnaPrograma, DIA_COLORS } from '@/lib/types'
-import { Plus, X, Users, Phone, Mail, Search, Link2, Check } from 'lucide-react'
+import { Plus, X, Users, Phone, Mail, Search, Link2, Check, AlertTriangle } from 'lucide-react'
+import { EXTRA_TARGET, EXTRA_LABEL, estadoExtra, mesesTranscurridos } from '@/lib/extras'
+
+type ExtrasAlumna = { uniforme: number; certificado: number }
 
 const STATUS_STYLES: Record<AlumnaStatus, { label: string; className: string }> = {
   activa:   { label: 'Activa',   className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
@@ -26,6 +29,8 @@ export default function AlumnasPage() {
   const [modal, setModal] = useState<Alumna | null | 'new'>(null)
   const [loading, setLoading] = useState(true)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [extras, setExtras] = useState<Record<string, ExtrasAlumna>>({})
+  const [inicio, setInicio] = useState<Record<string, { anio: number; mes: number }>>({})
   const supabase = createClient()
 
   const copiarEnlace = (alumna: Alumna) => {
@@ -40,12 +45,29 @@ export default function AlumnasPage() {
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    const [{ data: al }, { data: gr }] = await Promise.all([
+    const [{ data: al }, { data: gr }, { data: ex }, { data: col }] = await Promise.all([
       supabase.from('alumnas').select('*, grupo:grupos(*)').eq('user_id', user.id).order('nombre'),
       supabase.from('grupos').select('*').eq('user_id', user.id).order('dia'),
+      supabase.from('pagos_extras').select('alumna_id, concepto, monto').eq('user_id', user.id),
+      supabase.from('pagos_colegiaturas').select('alumna_id, anio, mes').eq('user_id', user.id),
     ])
     setAlumnas(al ?? [])
     setGrupos(gr ?? [])
+    // Mapa de extras por alumna
+    const exMap: Record<string, ExtrasAlumna> = {}
+    ;(ex ?? []).forEach(p => {
+      if (!exMap[p.alumna_id]) exMap[p.alumna_id] = { uniforme: 0, certificado: 0 }
+      const c = p.concepto as 'uniforme' | 'certificado'
+      if (c === 'uniforme' || c === 'certificado') exMap[p.alumna_id][c] = Number(p.monto)
+    })
+    setExtras(exMap)
+    // Inicio de curso = mes más antiguo con registro de colegiatura
+    const iniMap: Record<string, { anio: number; mes: number }> = {}
+    ;(col ?? []).forEach(p => {
+      const cur = iniMap[p.alumna_id]
+      if (!cur || (p.anio * 12 + p.mes) < (cur.anio * 12 + cur.mes)) iniMap[p.alumna_id] = { anio: p.anio, mes: p.mes }
+    })
+    setInicio(iniMap)
     setLoading(false)
   }, [])
 
@@ -69,6 +91,24 @@ export default function AlumnasPage() {
       if (data) setAlumnas(prev => prev.map(a => a.id === data.id ? data : a))
     }
     setModal(null)
+  }
+
+  // Guardar montos de uniforme/certificado (ajuste manual desde el perfil)
+  const handleSaveExtras = async (alumnaId: string, vals: ExtrasAlumna) => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    for (const concepto of ['uniforme', 'certificado'] as const) {
+      const monto = Math.max(0, Math.min(EXTRA_TARGET[concepto], vals[concepto]))
+      const estado = monto >= EXTRA_TARGET[concepto] ? 'pagado' : monto > 0 ? 'parcial' : 'pendiente'
+      const { data: ex } = await supabase.from('pagos_extras')
+        .select('id').eq('alumna_id', alumnaId).eq('concepto', concepto).maybeSingle()
+      if (ex) {
+        await supabase.from('pagos_extras').update({ monto, estado }).eq('id', ex.id)
+      } else {
+        await supabase.from('pagos_extras').insert({ user_id: user.id, alumna_id: alumnaId, concepto, monto, estado })
+      }
+    }
+    setExtras(prev => ({ ...prev, [alumnaId]: vals }))
   }
 
   const handleBaja = async (alumna: Alumna) => {
@@ -230,7 +270,10 @@ export default function AlumnasPage() {
         <AlumnaModal
           alumna={modal === 'new' ? null : modal}
           grupos={grupos}
+          extras={modal !== 'new' ? (extras[modal.id] ?? { uniforme: 0, certificado: 0 }) : { uniforme: 0, certificado: 0 }}
+          inicio={modal !== 'new' ? inicio[modal.id] : undefined}
           onSave={handleSave}
+          onSaveExtras={handleSaveExtras}
           onBaja={modal !== 'new' ? handleBaja : undefined}
           onClose={() => setModal(null)}
         />
@@ -239,12 +282,17 @@ export default function AlumnasPage() {
   )
 }
 
-function AlumnaModal({ alumna, grupos, onSave, onBaja, onClose }: {
+function AlumnaModal({ alumna, grupos, extras, inicio, onSave, onSaveExtras, onBaja, onClose }: {
   alumna: Alumna | null; grupos: Grupo[]
+  extras: ExtrasAlumna
+  inicio?: { anio: number; mes: number }
   onSave: (d: Partial<Alumna>) => void
+  onSaveExtras: (alumnaId: string, vals: ExtrasAlumna) => void
   onBaja?: (a: Alumna) => void
   onClose: () => void
 }) {
+  const [uniforme, setUniforme] = useState(String(extras.uniforme ?? 0))
+  const [certificado, setCertificado] = useState(String(extras.certificado ?? 0))
   const [nombre, setNombre] = useState(alumna?.nombre ?? '')
   const [telefono, setTelefono] = useState(alumna?.telefono ?? '')
   const [email, setEmail] = useState(alumna?.email ?? '')
@@ -258,6 +306,12 @@ function AlumnaModal({ alumna, grupos, onSave, onBaja, onClose }: {
 
   const handleSubmit = () => {
     if (!nombre.trim()) return
+    if (alumna) {
+      onSaveExtras(alumna.id, {
+        uniforme: parseFloat(uniforme) || 0,
+        certificado: parseFloat(certificado) || 0,
+      })
+    }
     onSave({
       nombre: nombre.trim(),
       telefono: telefono || null,
@@ -271,6 +325,12 @@ function AlumnaModal({ alumna, grupos, onSave, onBaja, onClose }: {
       notas: notas || null,
     })
   }
+
+  // Estatus de uniforme/certificado (con alerta por fecha)
+  const now = new Date(Date.now() - 6 * 3600 * 1000)
+  const elapsed = inicio ? mesesTranscurridos(inicio.anio, inicio.mes, now.getUTCFullYear(), now.getUTCMonth() + 1) : null
+  const stUniforme = estadoExtra('uniforme', parseFloat(uniforme) || 0, elapsed)
+  const stCertificado = estadoExtra('certificado', parseFloat(certificado) || 0, elapsed)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
@@ -346,6 +406,47 @@ function AlumnaModal({ alumna, grupos, onSave, onBaja, onClose }: {
                 className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
             </div>
           </div>
+
+          {/* Uniforme y Certificado (solo al editar) */}
+          {alumna && (
+            <div className="border-t border-slate-100 pt-4 space-y-3">
+              <p className="text-xs text-slate-500 uppercase tracking-wide font-semibold">Pagos extra</p>
+              {([
+                { key: 'uniforme' as const, st: stUniforme, val: uniforme, set: setUniforme },
+                { key: 'certificado' as const, st: stCertificado, val: certificado, set: setCertificado },
+              ]).map(({ key, st, val, set }) => {
+                const pct = Math.min(100, Math.round((st.pagado / st.target) * 100))
+                return (
+                  <div key={key}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+                        {EXTRA_LABEL[key]}
+                        {st.completo
+                          ? <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">Liquidado ✓</span>
+                          : st.vencido
+                            ? <span className="text-[10px] text-red-700 bg-red-50 px-1.5 py-0.5 rounded flex items-center gap-0.5"><AlertTriangle className="w-2.5 h-2.5" />Vencido</span>
+                            : st.porVencer
+                              ? <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">Por vencer</span>
+                              : <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">Falta ${st.falta.toLocaleString('es-MX')}</span>}
+                      </span>
+                      <span className="text-xs text-slate-400">de ${st.target.toLocaleString('es-MX')}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${st.completo ? 'bg-emerald-500' : st.vencido ? 'bg-red-400' : 'bg-blue-500'}`} style={{ width: `${pct}%` }} />
+                      </div>
+                      <div className="relative w-28">
+                        <span className="absolute left-2.5 top-2 text-slate-400 text-xs">$</span>
+                        <input type="number" min="0" max={st.target} value={val} onChange={e => set(e.target.value)}
+                          className="w-full pl-6 pr-2 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+              <p className="text-[11px] text-slate-400">Se actualiza solo al registrar pagos de Uniforme/Certificado en Caja; aquí puedes ajustarlo a mano.</p>
+            </div>
+          )}
 
           <div className="flex gap-3 pt-1">
             {alumna && onBaja && alumna.status === 'activa' && (
