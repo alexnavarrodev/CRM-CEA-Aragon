@@ -21,8 +21,8 @@ export async function POST(req: NextRequest) {
   const mpToken = process.env.MP_ACCESS_TOKEN
   if (!mpToken) return NextResponse.json({ error: 'Pago en línea no configurado' }, { status: 503 })
 
-  let token = '', concepto = 'mensualidad'
-  try { const b = await req.json(); token = b.token; concepto = b.concepto || 'mensualidad' } catch { /* noop */ }
+  let token = '', concepto = 'mensualidad', montoPedido = 0
+  try { const b = await req.json(); token = b.token; concepto = b.concepto || 'mensualidad'; montoPedido = Number(b.monto) || 0 } catch { /* noop */ }
   if (!token) return NextResponse.json({ error: 'Falta token' }, { status: 400 })
 
   const supabase = admin()
@@ -42,7 +42,9 @@ export async function POST(req: NextRequest) {
     const { data } = await supabase.from('pagos_extras')
       .select('monto').eq('alumna_id', alumna.id).eq('concepto', concepto).maybeSingle()
     const pagado = data ? Number(data.monto) : 0
-    total = Math.max(0, target - pagado)
+    const falta = Math.max(0, target - pagado)
+    // Aportación parcial: cobra lo pedido (tope = lo que falta); si no, todo lo que falta
+    total = montoPedido > 0 ? Math.min(montoPedido, falta) : falta
     itemTitle = `${EXTRA_LABEL[concepto]} — ${alumna.nombre}`
   } else {
     concepto = 'mensualidad'

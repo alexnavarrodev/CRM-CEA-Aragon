@@ -230,7 +230,7 @@ function ConceptoCard({ titulo, token, concepto, falta, target, completo, vencid
         </div>
       </div>
       <div className="p-3">
-        <BotonPagar token={token} concepto={concepto} label={`💳 Pagar ${titulo.toLowerCase()} · ${fmt(falta)}`} />
+        <BotonPagar token={token} concepto={concepto} editable maxMonto={falta} />
       </div>
     </section>
   )
