@@ -5,7 +5,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   planColegiatura, planBachillerato, mesToBachiTipo,
-  mesesAdeudadosCol, aplicaDescuentoProntoPago, PRONTO_PAGO_MONTO,
+  mesesAdeudadosCol, mesesAdeudadosBachi, aplicaDescuentoProntoPago, PRONTO_PAGO_MONTO,
 } from './acumulacion'
 
 interface AlumnaPago {
@@ -34,29 +34,42 @@ export async function aplicarPagoAlumna(
   const esBachi = alumna.programa === 'bachillerato' || alumna.programa === 'ambos'
   const colLimit = alumna.programa === 'ambos' ? 1000 : (Number(alumna.cuota_mensual) || 1000)
 
+  // Prefetch + descuento pronto pago (solo sobre colegiatura)
+  let colExisting: { id: string; anio: number; mes: number; monto: number; estado: string }[] = []
+  let bachiExisting: { id: string; anio: number; tipo: string; monto: number; estado: string }[] = []
+  let desc = 0
+  if (esCol) {
+    const { data } = await supabase.from('pagos_colegiaturas')
+      .select('id, anio, mes, monto, estado').eq('alumna_id', alumna.id)
+    colExisting = data ?? []
+    const adeudoCol = mesesAdeudadosCol(colExisting, colLimit, anio, mes)
+    desc = aplicaDescuentoProntoPago(alumna.programa, diaHoy, adeudoCol, anio, mes, colLimit) ? PRONTO_PAGO_MONTO : 0
+  }
+  if (esBachi) {
+    const { data } = await supabase.from('pagos_bachillerato')
+      .select('id, anio, tipo, monto, estado').eq('alumna_id', alumna.id)
+    bachiExisting = data ?? []
+  }
+
   const aplicarCol = async (m: number) => {
     if (m <= 0) return
-    const { data: existing } = await supabase
-      .from('pagos_colegiaturas').select('id, anio, mes, monto, estado')
-      .eq('alumna_id', alumna.id)
-    const plan = planColegiatura(existing ?? [], m, anio, mes, colLimit)
-    // Descuento pronto pago: completar el mes actual aunque entren $50 menos
-    const adeudoCol = mesesAdeudadosCol(existing ?? [], colLimit, anio, mes)
-    const desc = aplicaDescuentoProntoPago(alumna.programa, diaHoy, adeudoCol, anio, mes, colLimit)
-      ? PRONTO_PAGO_MONTO : 0
+    const plan = planColegiatura(colExisting, m, anio, mes, colLimit)
     for (const w of plan) {
       let estado = w.estado
+      let montoW = w.monto
+      // Descuento: completar el mes actual y mostrarlo como cuota completa
       if (desc > 0 && w.anio === anio && w.mes === mes && estado === 'parcial'
           && (colLimit - w.monto) <= desc) {
-        estado = 'pagado' // el descuento completa el mes
+        estado = 'pagado'
+        montoW = colLimit
       }
       if (w.id) {
         await supabase.from('pagos_colegiaturas')
-          .update({ monto: w.monto, estado, fecha_pago: fecha }).eq('id', w.id)
+          .update({ monto: montoW, estado, fecha_pago: fecha }).eq('id', w.id)
       } else {
         await supabase.from('pagos_colegiaturas').insert({
           user_id: alumna.user_id, alumna_id: alumna.id, anio: w.anio, mes: w.mes,
-          monto: w.monto, estado, fecha_pago: fecha,
+          monto: montoW, estado, fecha_pago: fecha,
         })
       }
     }
@@ -64,10 +77,7 @@ export async function aplicarPagoAlumna(
 
   const aplicarBachi = async (m: number) => {
     if (m <= 0) return
-    const { data: existing } = await supabase
-      .from('pagos_bachillerato').select('id, anio, tipo, monto, estado')
-      .eq('alumna_id', alumna.id)
-    const plan = planBachillerato(existing ?? [], m, anio, mesToBachiTipo(mes), 1000)
+    const plan = planBachillerato(bachiExisting, m, anio, mesToBachiTipo(mes), 1000)
     for (const w of plan) {
       if (w.id) {
         await supabase.from('pagos_bachillerato')
@@ -82,9 +92,16 @@ export async function aplicarPagoAlumna(
   }
 
   if (alumna.programa === 'ambos') {
-    const mitad = monto / 2
-    await aplicarCol(mitad)
-    await aplicarBachi(mitad)
+    if (desc > 0) {
+      // Descuento solo a colegiatura: bachillerato completo, colegiatura el resto (col - $50)
+      const bachiOwed = mesesAdeudadosBachi(bachiExisting, 1000, anio, mesToBachiTipo(mes)).reduce((s, x) => s + x.falta, 0)
+      await aplicarCol(monto - bachiOwed)
+      await aplicarBachi(bachiOwed)
+    } else {
+      const mitad = monto / 2
+      await aplicarCol(mitad)
+      await aplicarBachi(mitad)
+    }
   } else if (esCol) {
     await aplicarCol(monto)
   } else if (esBachi) {

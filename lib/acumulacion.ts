@@ -204,7 +204,8 @@ export function aplicaDescuentoProntoPago(
   programa: string, hoyDia: number, adeudoCol: MesAdeudado[],
   hoyAnio: number, hoyMes: number, limit: number,
 ): boolean {
-  if (programa !== 'colegiaturas') return false
+  // Aplica a colegiatura pura y a 'ambos' (solo sobre la parte de colegiatura)
+  if (programa !== 'colegiaturas' && programa !== 'ambos') return false
   if (hoyDia > PRONTO_PAGO_DIA_LIMITE) return false
   const cur = adeudoCol.find(m => m.anio === hoyAnio && m.mes === hoyMes)
   return !!cur && cur.falta >= limit
