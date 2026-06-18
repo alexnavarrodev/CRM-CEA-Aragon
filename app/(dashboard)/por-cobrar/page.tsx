@@ -110,12 +110,9 @@ export default function PorCobrarPage() {
 
   const whatsapp = (d: Deudora) => {
     const phone = waPhone(d.telefono)
-    const partes = [
-      ...d.meses.map(m => m.label),
-      ...d.extras.map(e => `${EXTRA_LABEL[e.concepto]} (${fmt(e.falta)})`),
-    ]
-    const detalle = partes.join(', ')
-    const msg = `Hola ${d.nombre} 👋\n\nTe recordamos tu pago pendiente de ${detalle} (${fmt(d.total)}).\n\nPuedes pagar en línea (SPEI o tarjeta) aquí:\n${enlace(d.pago_token)}\n\n¡Gracias! — CEA Aragón`
+    const mesesTxt = d.meses.map(m => m.label).join(', ')
+    const detalle = mesesTxt ? ` de ${mesesTxt}` : ''
+    const msg = `Hola ${d.nombre}\n\nTe recordamos tu pago pendiente${detalle}.\n\nPuedes pagar en línea (Transferencia o tarjeta) aquí:\n${enlace(d.pago_token)}\n\n¡Gracias! — CEA Aragón`
     const base = phone ? `https://wa.me/${phone}` : `https://wa.me/`
     window.open(`${base}?text=${encodeURIComponent(msg)}`, '_blank')
   }

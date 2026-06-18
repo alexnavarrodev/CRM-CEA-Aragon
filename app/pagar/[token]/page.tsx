@@ -128,7 +128,7 @@ export default async function PagarPage({ params, searchParams }: {
       {pago === 'pend' && (
         <div className="rounded-xl bg-amber-500/15 border border-amber-400/30 px-4 py-3 mb-4 text-center">
           <p className="text-amber-300 text-sm font-medium">Pago en proceso</p>
-          <p className="text-white/50 text-xs mt-0.5">Si pagaste por SPEI, puede tardar unos minutos.</p>
+          <p className="text-white/50 text-xs mt-0.5">Si pagaste por transferencia, puede tardar unos minutos.</p>
         </div>
       )}
 
