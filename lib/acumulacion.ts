@@ -195,7 +195,7 @@ export function mesesAdeudadosBachi(existing: PagoExistente[], limit: number, ha
 // Si paga antes del día límite, su colegiatura del mes actual baja $50 y ese mes
 // queda 'pagado' (no parcial). El $50 es un descuento, no afecta el estado.
 export const PRONTO_PAGO_MONTO = 50
-export const PRONTO_PAGO_DIA_LIMITE = 15
+export const PRONTO_PAGO_DIA_LIMITE = 20
 
 /** ¿Aplica descuento de pronto pago al mes actual de colegiatura?
  *  Requiere: programa 'colegiaturas', hoy ≤ día límite, y que el mes actual esté
