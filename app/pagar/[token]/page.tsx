@@ -131,7 +131,7 @@ export default async function PagarPage({ params, searchParams }: {
         <div className="space-y-4">
 
           {/* ── MENSUALIDAD ── */}
-          {mensTotal > 0 && (
+          {mensTotal > 0 ? (
             <section className="rounded-2xl bg-white/8 border border-white/10 overflow-hidden">
               <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
                 <span className="text-sm font-semibold text-white">Mensualidad</span>
@@ -160,6 +160,11 @@ export default async function PagarPage({ params, searchParams }: {
               <div className="p-3 pt-1">
                 <BotonPagar token={token} concepto="mensualidad" label={`💳 Pagar mensualidad · ${fmt(mensTotal)}`} />
               </div>
+            </section>
+          ) : (
+            <section className="rounded-2xl bg-emerald-500/10 border border-emerald-400/20 px-4 py-3 flex items-center justify-between">
+              <span className="text-sm font-semibold text-white">Mensualidad</span>
+              <span className="text-emerald-300 text-sm font-medium">Al corriente ✓</span>
             </section>
           )}
 
