@@ -11,7 +11,6 @@ import {
 } from '@/lib/acumulacion'
 import {
   EXTRA_TARGET, estadoExtra, mesesTranscurridos,
-  UNIFORME_MESES_LIMITE, CERTIFICADO_MES_LIMITE,
 } from '@/lib/extras'
 import BotonPagar from './BotonPagar'
 
@@ -32,14 +31,6 @@ const mesLabelBachi = (m: MesAdeudado) => {
   const idx = TIPOS_BACHI.indexOf((m.tipo ?? 'ene') as typeof TIPOS_BACHI[number])
   return `${MESES_FULL[idx]} ${m.anio} (bach.)`
 }
-// Mes de vencimiento = inicio + offset (uniforme offset 1 = mes 2; certificado offset 7 = mes 8)
-function venceLabel(startAnio: number, startMes: number, offset: number) {
-  const i = (startMes - 1) + offset
-  const y = startAnio + Math.floor(i / 12)
-  const mm = ((i % 12) + 12) % 12
-  return `${MESES_FULL[mm]} ${y}`
-}
-
 export default async function PagarPage({ params, searchParams }: {
   params: Promise<{ token: string }>
   searchParams: Promise<{ pago?: string }>
@@ -107,8 +98,6 @@ export default async function PagarPage({ params, searchParams }: {
   const certPaid = Number(exrows?.find(p => p.concepto === 'certificado')?.monto ?? 0)
   const stUni = estadoExtra('uniforme', uniPaid, elapsed)
   const stCert = estadoExtra('certificado', certPaid, elapsed)
-  const uniVence = start ? venceLabel(start.anio, start.mes, UNIFORME_MESES_LIMITE - 1) : null
-  const certVence = start ? venceLabel(start.anio, start.mes, CERTIFICADO_MES_LIMITE - 1) : null
 
   const todoAlCorriente = mensTotal <= 0 && stUni.completo && stCert.completo
 
@@ -178,14 +167,14 @@ export default async function PagarPage({ params, searchParams }: {
           <ConceptoCard
             titulo="Uniforme" token={token} concepto="uniforme"
             falta={stUni.falta} target={EXTRA_TARGET.uniforme} completo={stUni.completo}
-            vencido={stUni.vencido} vence={uniVence}
+            vencido={stUni.vencido}
           />
 
           {/* ── CERTIFICADO ── */}
           <ConceptoCard
             titulo="Certificado" token={token} concepto="certificado"
             falta={stCert.falta} target={EXTRA_TARGET.certificado} completo={stCert.completo}
-            vencido={stCert.vencido} vence={certVence}
+            vencido={stCert.vencido}
           />
         </div>
       )}
@@ -194,9 +183,9 @@ export default async function PagarPage({ params, searchParams }: {
 }
 
 // ── Tarjeta de concepto extra (uniforme / certificado) ───────────────────────
-function ConceptoCard({ titulo, token, concepto, falta, target, completo, vencido, vence }: {
+function ConceptoCard({ titulo, token, concepto, falta, target, completo, vencido }: {
   titulo: string; token: string; concepto: 'uniforme' | 'certificado'
-  falta: number; target: number; completo: boolean; vencido: boolean; vence: string | null
+  falta: number; target: number; completo: boolean; vencido: boolean
 }) {
   const pagado = target - falta
   const pct = Math.min(100, Math.round((pagado / target) * 100))
@@ -211,14 +200,7 @@ function ConceptoCard({ titulo, token, concepto, falta, target, completo, vencid
   return (
     <section className="rounded-2xl bg-white/8 border border-white/10 overflow-hidden">
       <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-        <div>
-          <span className="text-sm font-semibold text-white">{titulo}</span>
-          {vence && (
-            <span className={`ml-2 text-[11px] px-1.5 py-0.5 rounded ${vencido ? 'bg-red-500/20 text-red-300' : 'bg-white/10 text-white/50'}`}>
-              {vencido ? 'Venció' : 'Vence'} {vence}
-            </span>
-          )}
-        </div>
+        <span className="text-sm font-semibold text-white">{titulo}</span>
         <span className="text-white font-bold">{fmt(falta)}</span>
       </div>
       <div className="px-4 pt-3">
@@ -242,9 +224,9 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-slate-900 flex flex-col items-center px-5 py-10">
       <div className="w-full max-w-sm">
         <div className="flex items-center justify-center gap-2 mb-8">
-          <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-[11px] text-white">
-            CEA
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-cea.png" alt="CEA Aragón" className="w-9 h-9 rounded-full object-contain bg-white" />
+
           <div className="leading-tight">
             <p className="text-white font-semibold text-sm">CEA Aragón</p>
             <p className="text-white/40 text-[11px]">Escuela de Enfermería</p>

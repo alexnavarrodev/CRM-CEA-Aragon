@@ -70,10 +70,9 @@ export default function Sidebar({ userEmail, userName, onClose }: SidebarProps) 
       {/* Logo */}
       <div className="px-5 py-5 border-b border-white/8">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm text-white flex-shrink-0"
-               style={{ background: '#2563EB' }}>
-            CEA
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-cea.png" alt="CEA Aragón"
+               className="w-10 h-10 rounded-full object-contain bg-white flex-shrink-0" />
           <div>
             <p className="text-white font-semibold text-sm leading-tight">CEA Aragón</p>
             <p className="text-white/40 text-xs">Escuela de Enfermería</p>

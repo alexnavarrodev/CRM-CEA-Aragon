@@ -5,6 +5,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, 
 import { TrendingUp, TrendingDown, ChevronLeft, ChevronRight, X, AlertCircle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { MESES_FULL, MESES } from '@/lib/types'
+import { gananciaBachiDelMes } from '@/lib/margen'
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 function parseFecha(str: string): { anio: number; mes: number; dia: number } {
@@ -58,7 +59,7 @@ export default function PanelClient() {
   const [cobranzaOpen, setCobranzaOpen] = useState(false)
 
   const [movimientos, setMovimientos] = useState<{
-    id: string; tipo: string; categoria: string; monto: number; fecha: string
+    id: string; tipo: string; categoria: string; monto: number; fecha: string; alumna_id: string | null
   }[]>([])
   const [alumnas, setAlumnas]   = useState<AlumnaRow[]>([])
   const [pagosCol, setPagosCol] = useState<PagoCol[]>([])
@@ -71,7 +72,7 @@ export default function PanelClient() {
     if (!user) return
 
     const [{ data: movs }, { data: al }, { data: pg }] = await Promise.all([
-      supabase.from('movimientos_caja').select('id,tipo,categoria,monto,fecha')
+      supabase.from('movimientos_caja').select('id,tipo,categoria,monto,fecha,alumna_id')
         .eq('user_id', user.id),
       // ← ahora incluye 'nombre'
       supabase.from('alumnas').select('id,nombre,programa,cuota_mensual')
@@ -96,12 +97,17 @@ export default function PanelClient() {
   const totalGastos   = gastosMes.reduce((s, m) => s + Number(m.monto), 0)
 
   const margen = (() => {
+    // Colegiatura + extras (la mitad de 'ambos' es colegiatura); el bachillerato
+    // se suma aparte sólo por su ganancia (lo que excede el costo por alumna).
     const sinBachi = ingresosMes.reduce((s, m) => {
       if (m.categoria === 'bachillerato') return s
       if (m.categoria === 'ambos')        return s + Number(m.monto) / 2
       return s + Number(m.monto)
     }, 0)
-    return sinBachi - totalGastos
+    const gananciaBachi = gananciaBachiDelMes(
+      movimientos.filter(m => m.tipo === 'ingreso'), anio, mes,
+    )
+    return sinBachi + gananciaBachi - totalGastos
   })()
 
   // ── Cobranza pendiente ────────────────────────────────────────────────────
@@ -219,7 +225,7 @@ export default function PanelClient() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         <KpiCard
           title="Margen del mes"
-          subtitle="(sin bachillerato)"
+          subtitle="(bachi: sólo ganancia)"
           value={fmt(margen)}
           badge={`${margenPct}% del ingreso`}
           badgeColor={margen >= 0 ? 'emerald' : 'red'}

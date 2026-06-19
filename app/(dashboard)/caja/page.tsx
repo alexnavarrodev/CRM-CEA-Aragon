@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Alumna, MovimientoCaja, MovimientoTipo, Canal, MESES } from '@/lib/types'
 import { mesToBachiTipo, planColegiatura, planBachillerato } from '@/lib/acumulacion'
 import { EXTRA_TARGET } from '@/lib/extras'
+import { gananciaBachiDelMes } from '@/lib/margen'
 import {
   Plus, TrendingUp, TrendingDown, X, ArrowUpRight, ArrowDownRight,
   User, Trash2, Pencil, ChevronDown, ChevronUp, Tag, Check,
@@ -114,14 +115,24 @@ export default function CajaPage() {
 
   const totalIngresos = filtrados.filter(m => m.tipo === 'ingreso').reduce((s, m) => s + Number(m.monto), 0)
   const totalGastos   = filtrados.filter(m => m.tipo === 'egreso').reduce((s, m) => s + Number(m.monto), 0)
-  // Margen excluye bachillerato completo y la mitad de 'ambos' (Col.+Bachi)
+  // Margen: colegiatura completa + la mitad de 'ambos' (la otra mitad es bachi).
+  // El bachillerato se suma aparte sólo por su ganancia (lo que excede el costo
+  // acumulado por alumna). Ver lib/margen.ts.
   const ingresosMargen = filtrados
     .filter(m => m.tipo === 'ingreso' && m.categoria !== 'bachillerato')
     .reduce((s, m) => {
       if (m.categoria === 'ambos') return s + Number(m.monto) / 2  // solo la parte de colegiatura
       return s + Number(m.monto)
     }, 0)
-  const balance = ingresosMargen - totalGastos
+  // La ganancia de bachi se calcula sobre el mes seleccionado (filtroMes) y sólo
+  // cuando no hay filtro de categoría activo, para no contaminar las vistas por
+  // categoría. Usa TODOS los movimientos para acumular bien por alumna.
+  const gananciaBachi = (() => {
+    if (!filtroMes || filtroCategoria !== 'todos') return 0
+    const [a, m] = filtroMes.split('-').map(Number)
+    return gananciaBachiDelMes(movimientos.filter(x => x.tipo === 'ingreso'), a, m)
+  })()
+  const balance = ingresosMargen + gananciaBachi - totalGastos
 
   // ── Save new movement ─────────────────────────────────────────────────────
   const handleAdd = async (payload: {
@@ -306,7 +317,7 @@ export default function CajaPage() {
               </div>
               <div className={`rounded-xl p-2.5 md:p-3 border ${balance >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
                 <p className={`text-[10px] md:text-xs font-medium mb-0.5 ${balance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                  Margen <span className="font-normal opacity-60">(sin Bachi)</span>
+                  Margen <span className="font-normal opacity-60">(bachi: ganancia)</span>
                 </p>
                 <p className={`text-base md:text-xl font-bold truncate ${balance >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>${balance.toLocaleString('es-MX')}</p>
               </div>

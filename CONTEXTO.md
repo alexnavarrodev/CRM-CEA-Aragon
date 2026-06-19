@@ -59,8 +59,9 @@ netlify deploy --build --prod
 - **V2** = `main` (actual, con todo el módulo de pagos). Volver a V1 = redeploy desde `v1`.
 
 ## Páginas (`app/(dashboard)/` salvo `/pagar`)
-- `dashboard/` (Panel, client) — KPIs por mes con filtro ◀▶; **Margen** (sin bachillerato;
-  ambos cuenta a la mitad); **Cobranza pendiente** clickable → modal con alumnas que deben.
+- `dashboard/` (Panel, client) — KPIs por mes con filtro ◀▶; **Margen** (bachillerato sólo
+  por su ganancia >$5000 acumulado por alumna; ambos cuenta col completo + bachi-ganancia);
+  **Cobranza pendiente** clickable → modal con alumnas que deben.
 - `colegiaturas/` — grid Nov2025→Dic2027, agrupado por grupo, filtros estado, header colapsable.
 - `bachillerato/` — igual; celdas muestran monto; estados pagado/parcial/pendiente; acepta $0/Pagado.
 - `caja/` — ingresos/egresos; filtro mes y categoría; gestión categorías (localStorage);
@@ -99,7 +100,11 @@ netlify deploy --build --prod
 - **Acumulación**: el pago va al mes más antiguo sin pagar y rebosa; límite $1000/mes
   (colegiatura ambos=1000, colegiatura pura=cuota; bachillerato=1000).
 - **'ambos'** = $2000 = $1000 col + $1000 bachi (split 50/50).
-- **Margen** (Panel y Caja): excluye bachillerato; 'ambos' cuenta solo la mitad (col).
+- **Margen** (Panel y Caja): el bachillerato SÍ deja ganancia. Tramitarlo cuesta `BACHI_COSTO`
+  ($5000) por alumna, así que los primeros $5000 ACUMULADOS de bachi de cada alumna son costo
+  (no cuentan) y lo que pague de ahí en adelante es ganancia (lib/margen.ts → `gananciaBachiDelMes`).
+  Colegiatura cuenta completa; en 'ambos' la mitad es col (completa) + mitad bachi (sólo ganancia).
+  El margen mensual queda disparejo a propósito (meses iniciales bajos hasta cubrir el costo).
 - **Descuento pronto pago $50**: programa colegiaturas Y ambos (solo lado colegiatura), si
   paga antes del día 20 y el mes actual está sin pagar. El mes queda 'pagado' mostrando $1000
   (la Caja registra el dinero real). En 'ambos': bachillerato completo, colegiatura −$50.

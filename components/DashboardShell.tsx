@@ -52,9 +52,9 @@ export default function DashboardShell({ children, userEmail, userName }: Props)
             <Menu className="w-5 h-5" />
           </button>
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">
-              CEA
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo-cea.png" alt="CEA Aragón"
+                 className="w-7 h-7 rounded-full object-contain bg-white flex-shrink-0" />
             <span className="text-white font-semibold text-sm">CEA Aragón</span>
           </div>
         </div>
