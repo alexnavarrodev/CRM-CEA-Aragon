@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { hoyMX } from '@/lib/fecha'
 import {
   Mic, MicOff, Loader2, CheckCircle2, AlertCircle,
   RotateCcw, Save, ChevronDown,
@@ -82,7 +83,7 @@ export default function VozPage() {
   const [entrada, setEntrada] = useState<EntradaParsed | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
   const [alumnas, setAlumnas] = useState<{ id: string; nombre: string; programa: string }[]>([])
-  const [fecha, setFecha] = useState(() => new Date().toISOString().slice(0, 10))
+  const [fecha, setFecha] = useState(() => hoyMX())
 
   const recognitionRef = useRef<ISpeechRecognition | null>(null)
   const transcriptRef = useRef('')
@@ -115,7 +116,7 @@ export default function VozPage() {
         return
       }
       setEntrada(data as EntradaParsed)
-      setFecha(new Date().toISOString().slice(0, 10))
+      setFecha(hoyMX())
       setEstado('confirmar')
     } catch {
       setErrorMsg('Error de red al contactar la API')
@@ -213,7 +214,7 @@ export default function VozPage() {
     setInterimText('')
     setEntrada(null)
     setErrorMsg('')
-    setFecha(new Date().toISOString().slice(0, 10))
+    setFecha(hoyMX())
   }
 
   return (

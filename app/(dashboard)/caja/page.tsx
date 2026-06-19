@@ -6,6 +6,7 @@ import { Alumna, MovimientoCaja, MovimientoTipo, Canal, MESES } from '@/lib/type
 import { mesToBachiTipo, planColegiatura, planBachillerato } from '@/lib/acumulacion'
 import { EXTRA_TARGET } from '@/lib/extras'
 import { gananciaBachiDelMes } from '@/lib/margen'
+import { hoyMX } from '@/lib/fecha'
 import {
   Plus, TrendingUp, TrendingDown, X, ArrowUpRight, ArrowDownRight,
   User, Trash2, Pencil, ChevronDown, ChevronUp, Tag, Check,
@@ -779,7 +780,7 @@ function MovimientoModal({ categorias, onSave, onClose }: {
   const [concepto, setConcepto]   = useState('')
   const [monto, setMonto]         = useState('')
   const [canal, setCanal]         = useState<Canal>('efectivo')
-  const [fecha, setFecha]         = useState(new Date().toISOString().slice(0, 10))
+  const [fecha, setFecha]         = useState(hoyMX())
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Alumna, Grupo, PagoColegiatura, MESES, PagoEstado, DIA_COLORS } from '@/lib/types'
+import { hoyMX } from '@/lib/fecha'
 import { Plus, Check, X, ChevronDown, ChevronUp } from 'lucide-react'
 
 // ─── Rango NOV 2025 → DIC 2027 ───────────────────────────────────────────────
@@ -94,12 +95,12 @@ export default function ColegiatutasPage() {
     let row
     if (existing) {
       const { data } = await supabase.from('pagos_colegiaturas')
-        .update({ monto, estado, fecha_pago: new Date().toISOString().slice(0, 10) })
+        .update({ monto, estado, fecha_pago: hoyMX() })
         .eq('id', existing.id).select().single()
       row = data
     } else {
       const { data } = await supabase.from('pagos_colegiaturas')
-        .insert({ user_id: user.id, alumna_id: modal.alumna.id, anio: modal.anio, mes: modal.mes, monto, estado, fecha_pago: new Date().toISOString().slice(0, 10) })
+        .insert({ user_id: user.id, alumna_id: modal.alumna.id, anio: modal.anio, mes: modal.mes, monto, estado, fecha_pago: hoyMX() })
         .select().single()
       row = data
     }

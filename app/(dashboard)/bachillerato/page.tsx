@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Alumna, Grupo, PagoBachillerato, PagoEstado, DIA_COLORS } from '@/lib/types'
+import { hoyMX } from '@/lib/fecha'
 import { Check, Plus, X, GraduationCap, ChevronDown, ChevronUp } from 'lucide-react'
 
 const TIPOS = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'] as const
@@ -86,7 +87,7 @@ export default function BachilleratoPage() {
     const key = `${modal.anio}-${modal.tipo}`
     const existing = pagos[modal.alumna.id]?.[key]
     const fecha_pago = (estado === 'pagado' || estado === 'parcial')
-      ? new Date().toISOString().slice(0, 10) : null
+      ? hoyMX() : null
     let row
     if (existing) {
       const { data } = await supabase.from('pagos_bachillerato')

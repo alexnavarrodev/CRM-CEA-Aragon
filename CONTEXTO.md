@@ -114,6 +114,8 @@ netlify deploy --build --prod
   SMX=Feb2026, VML=Abr2026, SML=May2026. Meses previos se marcan **$0/Pagado** (ya hecho).
 - **Fechas**: NUNCA `new Date('YYYY-MM-DD')` para comparar meses (UTC desfasa en UTC-6). Usar
   `fecha.slice(0,7)` o parsear el string. La "hora de México" se calcula `Date.now()-6h`.
+  Para la fecha de HOY en formularios usar `hoyMX()` (lib/fecha.ts), NO
+  `new Date().toISOString().slice(0,10)` (después de las 6pm MX da el día siguiente).
 
 ## Tablas Supabase (RLS por user_id)
 - `grupos`, `alumnas` (+ `pago_token` único), `pagos_colegiaturas` (anio,mes,monto,estado),

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Prospecto, ProspectoStatus, PROSPECTO_ESTADOS } from '@/lib/types'
+import { hoyMX } from '@/lib/fecha'
 import { Plus, X, UserPlus, Phone, Mail, MessageCircle } from 'lucide-react'
 
 const COLUMNAS: ProspectoStatus[] = ['nuevo', 'contactado', 'interesado', 'inscrito', 'no_interesado']
@@ -182,7 +183,7 @@ function ProspectoModal({ prospecto, onSave, onDelete, onClose }: {
   const [interes, setInteres] = useState(prospecto?.interes ?? '')
   const [status, setStatus] = useState<ProspectoStatus>(prospecto?.status ?? 'nuevo')
   const [notas, setNotas] = useState(prospecto?.notas ?? '')
-  const [fecha, setFecha] = useState(prospecto?.fecha_contacto ?? new Date().toISOString().slice(0, 10))
+  const [fecha, setFecha] = useState(prospecto?.fecha_contacto ?? hoyMX())
 
   const handleSubmit = () => {
     if (!nombre.trim()) return

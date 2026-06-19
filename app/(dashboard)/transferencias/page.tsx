@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { hoyMX } from '@/lib/fecha'
 import { Plus, Minus, Trash2, X, ArrowUpRight, ArrowDownRight } from 'lucide-react'
 
 interface WalletEntry {
@@ -221,7 +222,7 @@ function EntryModal({ mode, onSave, onClose }: {
   const isAdd = mode === 'add'
   const [concepto, setConcepto] = useState(isAdd ? '' : 'Sueldos semanal')
   const [monto, setMonto]       = useState('')
-  const [fecha, setFecha]       = useState(new Date().toISOString().slice(0, 10))
+  const [fecha, setFecha]       = useState(hoyMX())
 
   const handleSubmit = () => {
     const m = parseFloat(monto.replace(',', '.')) || 0
