@@ -43,6 +43,8 @@ export default function BachilleratoPage() {
   const [modal, setModal] = useState<{ alumna: Alumna; anio: number; tipo: TipoMes } | null>(null)
   const [loading, setLoading] = useState(true)
   const [headerOpen, setHeaderOpen] = useState(true)
+  const [grupos, setGrupos] = useState<Grupo[]>([])
+  const [grupoFiltro, setGrupoFiltro] = useState<string>('todos')
 
   const toggleFiltro = (e: PagoEstado) =>
     setFiltroEstado(prev => prev.includes(e) ? prev.filter(x => x !== e) : [...prev, e])
@@ -51,11 +53,13 @@ export default function BachilleratoPage() {
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    const [{ data: al }, { data: pg }] = await Promise.all([
+    const [{ data: al }, { data: pg }, { data: gr }] = await Promise.all([
       supabase.from('alumnas').select('*, grupo:grupos(*)').eq('user_id', user.id).in('programa', ['bachillerato', 'ambos']).eq('status', 'activa').order('nombre'),
       supabase.from('pagos_bachillerato').select('*').eq('user_id', user.id).gte('anio', 2025).lte('anio', 2027),
+      supabase.from('grupos').select('*').eq('user_id', user.id).order('dia'),
     ])
     setAlumnas(al ?? [])
+    setGrupos(gr ?? [])
     const map: PagoMap = {}
     ;(pg ?? []).forEach(p => {
       if (!map[p.alumna_id]) map[p.alumna_id] = {}
@@ -68,7 +72,8 @@ export default function BachilleratoPage() {
   useEffect(() => { load() }, [load])
 
   const alumnasFiltradas = alumnas.filter(a =>
-    !busqueda || a.nombre.toLowerCase().includes(busqueda.toLowerCase())
+    (!busqueda || a.nombre.toLowerCase().includes(busqueda.toLowerCase())) &&
+    (grupoFiltro === 'todos' || a.grupo_id === grupoFiltro)
   )
 
   // KPIs
@@ -152,6 +157,26 @@ export default function BachilleratoPage() {
                 <p className="text-[10px] md:text-xs text-slate-500 font-medium">Pagos registrados</p>
                 <p className="text-base md:text-xl font-bold text-slate-700">{celdasPagadas}</p>
               </div>
+            </div>
+
+            {/* Group filters */}
+            <div className="flex items-center gap-2 flex-wrap mb-3">
+              <button onClick={() => setGrupoFiltro('todos')}
+                className={`px-4 py-1.5 rounded-full text-sm font-medium border transition ${grupoFiltro === 'todos' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
+                Todos los grupos
+              </button>
+              {grupos.map(g => {
+                const c = DIA_COLORS[g.dia] || { bg: '#94A3B8', text: '#fff' }
+                const active = grupoFiltro === g.id
+                return (
+                  <button key={g.id} onClick={() => setGrupoFiltro(active ? 'todos' : g.id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition border"
+                    style={{ background: active ? c.bg : '#fff', color: active ? c.text : '#475569', borderColor: active ? c.bg : '#E2E8F0' }}>
+                    <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style={{ background: c.bg }}>{g.dia}</span>
+                    {g.nombre}
+                  </button>
+                )
+              })}
             </div>
 
             {/* Search + filtro estado */}

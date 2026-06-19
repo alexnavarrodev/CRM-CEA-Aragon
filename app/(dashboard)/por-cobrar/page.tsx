@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { MESES_FULL } from '@/lib/types'
+import { MESES_FULL, Grupo, DIA_COLORS } from '@/lib/types'
 import { mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, TIPOS_BACHI } from '@/lib/acumulacion'
 import { EXTRA_LABEL, estadoExtra, mesesTranscurridos } from '@/lib/extras'
 import { MessageCircle, Link2, Check, AlertCircle, Phone, AlertTriangle } from 'lucide-react'
@@ -13,6 +13,7 @@ interface MesPend { anio: number; mesNum: number; label: string; falta: number }
 interface ExtraPend { concepto: string; falta: number; vencido: boolean }
 interface Deudora {
   id: string; nombre: string; telefono: string | null; pago_token: string | null
+  grupoId: string | null
   total: number; meses: MesPend[]; extras: ExtraPend[]; atrasoDias: number; vencido: boolean
 }
 
@@ -30,18 +31,22 @@ export default function PorCobrarPage() {
   const [deudoras, setDeudoras] = useState<Deudora[]>([])
   const [loading, setLoading] = useState(true)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [grupos, setGrupos] = useState<Grupo[]>([])
+  const [grupoFiltro, setGrupoFiltro] = useState<string>('todos')
   const supabase = createClient()
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    const [{ data: al }, { data: col }, { data: ba }, { data: exrows }] = await Promise.all([
-      supabase.from('alumnas').select('id,nombre,telefono,programa,cuota_mensual,pago_token')
+    const [{ data: al }, { data: col }, { data: ba }, { data: exrows }, { data: gr }] = await Promise.all([
+      supabase.from('alumnas').select('id,nombre,telefono,programa,cuota_mensual,pago_token,grupo_id')
         .eq('user_id', user.id).eq('status', 'activa'),
       supabase.from('pagos_colegiaturas').select('alumna_id,id,anio,mes,monto,estado').eq('user_id', user.id),
       supabase.from('pagos_bachillerato').select('alumna_id,id,anio,tipo,monto,estado').eq('user_id', user.id),
       supabase.from('pagos_extras').select('alumna_id,concepto,monto').eq('user_id', user.id),
+      supabase.from('grupos').select('*').eq('user_id', user.id).order('dia'),
     ])
+    setGrupos(gr ?? [])
 
     const now = new Date(Date.now() - 6 * 3600 * 1000)
     const hoyA = now.getUTCFullYear(), hoyM = now.getUTCMonth() + 1
@@ -89,7 +94,7 @@ export default function PorCobrarPage() {
         atrasoDias = Math.max(0, Math.floor((hoy.getTime() - new Date(o.anio, o.mesNum - 1, 1).getTime()) / 86400000))
       }
       const vencido = extras.some(e => e.vencido)
-      lista.push({ id: a.id, nombre: a.nombre, telefono: a.telefono, pago_token: a.pago_token, total, meses, extras, atrasoDias, vencido })
+      lista.push({ id: a.id, nombre: a.nombre, telefono: a.telefono, pago_token: a.pago_token, grupoId: a.grupo_id, total, meses, extras, atrasoDias, vencido })
     }
     // Vencidos de uniforme/certificado primero, luego por días de atraso, luego por monto
     lista.sort((a, b) => (Number(b.vencido) - Number(a.vencido)) || (b.atrasoDias - a.atrasoDias) || (b.total - a.total))
@@ -117,7 +122,10 @@ export default function PorCobrarPage() {
     window.open(`${base}?text=${encodeURIComponent(msg)}`, '_blank')
   }
 
-  const totalGeneral = deudoras.reduce((s, d) => s + d.total, 0)
+  const deudorasFiltradas = grupoFiltro === 'todos'
+    ? deudoras
+    : deudoras.filter(d => d.grupoId === grupoFiltro)
+  const totalGeneral = deudorasFiltradas.reduce((s, d) => s + d.total, 0)
 
   return (
     <div className="flex flex-col h-full animate-fade-in">
@@ -125,8 +133,30 @@ export default function PorCobrarPage() {
       <div className="px-4 md:px-6 py-5 bg-white border-b border-slate-200 flex-shrink-0">
         <h1 className="text-xl md:text-2xl font-bold text-slate-900">Por cobrar</h1>
         <p className="text-sm text-slate-400 mt-0.5">
-          {loading ? 'Cargando…' : `${deudoras.length} alumnas · ${fmt(totalGeneral)} pendiente · ordenadas por atraso`}
+          {loading ? 'Cargando…' : `${deudorasFiltradas.length} alumnas · ${fmt(totalGeneral)} pendiente · ordenadas por atraso`}
         </p>
+
+        {/* Group filters */}
+        {grupos.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap mt-3">
+            <button onClick={() => setGrupoFiltro('todos')}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium border transition ${grupoFiltro === 'todos' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
+              Todos los grupos
+            </button>
+            {grupos.map(g => {
+              const c = DIA_COLORS[g.dia] || { bg: '#94A3B8', text: '#fff' }
+              const active = grupoFiltro === g.id
+              return (
+                <button key={g.id} onClick={() => setGrupoFiltro(active ? 'todos' : g.id)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition border"
+                  style={{ background: active ? c.bg : '#fff', color: active ? c.text : '#475569', borderColor: active ? c.bg : '#E2E8F0' }}>
+                  <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style={{ background: c.bg }}>{g.dia}</span>
+                  {g.nombre}
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-auto p-4 md:p-6">
@@ -138,9 +168,15 @@ export default function PorCobrarPage() {
             <p className="text-slate-500 font-medium">¡Todas al corriente! 🎉</p>
             <p className="text-slate-400 text-sm">No hay cobranza pendiente.</p>
           </div>
+        ) : deudorasFiltradas.length === 0 ? (
+          <div className="text-center py-16">
+            <Check className="w-12 h-12 text-emerald-300 mx-auto mb-3" />
+            <p className="text-slate-500 font-medium">Este grupo está al corriente 🎉</p>
+            <p className="text-slate-400 text-sm">No hay cobranza pendiente en el grupo seleccionado.</p>
+          </div>
         ) : (
           <div className="space-y-2.5">
-            {deudoras.map(d => {
+            {deudorasFiltradas.map(d => {
               const phone = waPhone(d.telefono)
               return (
                 <div key={d.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
