@@ -68,8 +68,8 @@ netlify deploy --build --prod
   registrar movimiento de alumna acumula en colegiatura/bachi/uniforme/certificado.
 - `por-cobrar/` — alumnas con adeudo ordenadas por días de atraso + uniforme/certificado
   (vencidos primero); botón "Recordar por WhatsApp" (wa.me) + copiar enlace.
-- `transferencias/` — wallet de control interno (user_metadata.wallet_entries).
-- `calendario/` — fechas de pago por grupo (user_metadata.payment_calendars_v2) + resumen mensual.
+- `transferencias/` — wallet de control interno (app_kv key `wallet_entries`, vía lib/kv.ts).
+- `calendario/` — fechas de pago por grupo (app_kv key `payment_calendars_v2`) + resumen mensual.
 - `voz/` — captura por voz → `/api/voice` (OpenAI) → movimiento de caja.
 - `alumnas/` — alta/edición; **botón copiar enlace de pago**; sección Uniforme/Certificado
   (barras + ajuste manual + alerta vencido).
@@ -121,7 +121,11 @@ netlify deploy --build --prod
 - `grupos`, `alumnas` (+ `pago_token` único), `pagos_colegiaturas` (anio,mes,monto,estado),
   `pagos_bachillerato` (anio,tipo,monto,estado), `movimientos_caja`, `prospectos`,
   `pagos_online` (mp_payment_id único, idempotencia), `pagos_extras` (alumna+concepto, único).
-- En `auth user_metadata`: `wallet_entries` (transferencias), `payment_calendars_v2` (calendario).
+- `app_kv` (user_id+key, value jsonb): clave/valor por usuario para datos grandes —
+  `wallet_entries` (transferencias) y `payment_calendars_v2` (calendario). Antes vivían en
+  `auth user_metadata`, pero inflaban el JWT/cookie de sesión y el CDN devolvía HTTP 400 en
+  dispositivos con sesión iniciada. Acceso vía `lib/kv.ts` (`kvGet`/`kvSet`). NO volver a meter
+  datos que crecen en user_metadata. SQL: `supabase-app-kv.sql`.
 - localStorage: `crm_categorias` (categorías de caja, por navegador).
 
 ## Mercado Pago
@@ -144,3 +148,4 @@ y el remitente del correo). Atenea aún NO tiene Mercado Pago configurado (cuent
 ## SQL que el usuario ya corrió (referencia)
 `supabase-pago-token.sql`, `supabase-pagos-online.sql`, `supabase-pagos-extras.sql`
 (en Aragón y Atenea). El esquema base está en `supabase-schema.sql`.
+`supabase-app-kv.sql` (tabla app_kv) — corrido en Aragón; FALTA correrlo en Atenea al portar.
