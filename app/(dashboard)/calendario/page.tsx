@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Grupo, Alumna, PagoColegiatura, DIA_COLORS } from '@/lib/types'
+import { kvGet, kvSet } from '@/lib/kv'
 import { ChevronLeft, ChevronRight, Plus, Trash2, X, RefreshCw, Copy } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -141,14 +142,14 @@ export default function CalendarioPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    // Load calendars from user_metadata
-    const raw = user.user_metadata?.[META_KEY]
+    // Load calendars from app_kv (antes user_metadata, ver lib/kv.ts)
+    const raw = await kvGet<PaymentCalendar[]>(supabase, META_KEY)
     if (Array.isArray(raw) && raw.length > 0) {
       setCalendars(raw as PaymentCalendar[])
     } else {
       // First load: pre-populate with the 5 groups from image
       setCalendars(INITIAL_CALENDARS)
-      await supabase.auth.updateUser({ data: { [META_KEY]: INITIAL_CALENDARS } })
+      await kvSet(supabase, META_KEY, INITIAL_CALENDARS)
     }
     setLoadingCals(false)
 
@@ -167,7 +168,7 @@ export default function CalendarioPage() {
 
   const persist = async (cals: PaymentCalendar[]) => {
     setSaving(true)
-    await supabase.auth.updateUser({ data: { [META_KEY]: cals } })
+    await kvSet(supabase, META_KEY, cals)
     setSaving(false)
   }
 

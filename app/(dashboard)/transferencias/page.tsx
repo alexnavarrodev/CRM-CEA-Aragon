@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { hoyMX } from '@/lib/fecha'
+import { kvGet, kvSet } from '@/lib/kv'
 import { Plus, Minus, Trash2, X, ArrowUpRight, ArrowDownRight } from 'lucide-react'
 
 interface WalletEntry {
@@ -15,18 +16,17 @@ interface WalletEntry {
 
 type ModalMode = 'add' | 'subtract'
 
-// ─── Supabase user_metadata helpers ──────────────────────────────────────────
-// Guardamos las entradas en user_metadata.wallet_entries (no requiere nueva tabla)
+// ─── Storage (tabla app_kv, ver lib/kv.ts) ───────────────────────────────────
+// Antes vivían en user_metadata.wallet_entries, pero eso inflaba la cookie de
+// sesión y rompía el login con HTTP 400. Ahora en app_kv (key 'wallet_entries').
 
 async function loadFromSupabase(supabase: ReturnType<typeof createClient>): Promise<WalletEntry[]> {
-  const { data: { user } } = await supabase.auth.getUser()
-  const raw = user?.user_metadata?.wallet_entries
-  if (!raw || !Array.isArray(raw)) return []
-  return raw as WalletEntry[]
+  const raw = await kvGet<WalletEntry[]>(supabase, 'wallet_entries')
+  return Array.isArray(raw) ? raw : []
 }
 
 async function saveToSupabase(supabase: ReturnType<typeof createClient>, entries: WalletEntry[]) {
-  await supabase.auth.updateUser({ data: { wallet_entries: entries } })
+  await kvSet(supabase, 'wallet_entries', entries)
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
