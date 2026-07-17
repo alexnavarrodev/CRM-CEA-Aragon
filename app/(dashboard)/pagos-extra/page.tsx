@@ -18,6 +18,8 @@ interface Row {
 
 export default function PagosExtraPage() {
   const [rows, setRows] = useState<Row[]>([])
+  const [grupos, setGrupos] = useState<Grupo[]>([])
+  const [grupoFiltro, setGrupoFiltro] = useState<string>('todos')
   const [loading, setLoading] = useState(true)
   const [editando, setEditando] = useState<{ alumnaId: string; concepto: Concepto } | null>(null)
   const [valorEdit, setValorEdit] = useState('')
@@ -26,11 +28,13 @@ export default function PagosExtraPage() {
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    const [{ data: al }, { data: ex }, { data: col }] = await Promise.all([
+    const [{ data: al }, { data: ex }, { data: col }, { data: gr }] = await Promise.all([
       supabase.from('alumnas').select('*, grupo:grupos(*)').eq('user_id', user.id).order('nombre'),
       supabase.from('pagos_extras').select('alumna_id, concepto, monto').eq('user_id', user.id),
       supabase.from('pagos_colegiaturas').select('alumna_id, anio, mes').eq('user_id', user.id),
+      supabase.from('grupos').select('*').eq('user_id', user.id).order('dia'),
     ])
+    setGrupos(gr ?? [])
     const exMap: Record<string, Extras> = {}
     ;(ex ?? []).forEach(p => {
       if (!exMap[p.alumna_id]) exMap[p.alumna_id] = { rcp: 0, uniforme: 0, certificado: 0 }
@@ -79,21 +83,40 @@ export default function PagosExtraPage() {
     setEditando(null)
   }
 
-  const liquidadasCount = rows.filter(r => CONCEPTOS.every(c => r.extras[c] >= EXTRA_TARGET[c])).length
+  const filteredRows = rows.filter(r => grupoFiltro === 'todos' || r.alumna.grupo_id === grupoFiltro)
+  const liquidadasCount = filteredRows.filter(r => CONCEPTOS.every(c => r.extras[c] >= EXTRA_TARGET[c])).length
 
   return (
     <div className="flex flex-col h-full animate-fade-in">
       <div className="px-4 md:px-6 py-5 bg-white border-b border-slate-200 flex-shrink-0">
         <h1 className="text-xl md:text-2xl font-bold text-slate-900">RCP / Uniforme / Certificado</h1>
-        <p className="text-sm text-slate-400 mt-0.5">
-          {loading ? 'Cargando…' : `${rows.length} alumnas · ${liquidadasCount} con las 3 liquidadas`}
+        <p className="text-sm text-slate-400 mt-0.5 mb-3">
+          {loading ? 'Cargando…' : `${filteredRows.length} alumnas · ${liquidadasCount} con las 3 liquidadas`}
         </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={() => setGrupoFiltro('todos')}
+            className={`px-4 py-1.5 rounded-full text-sm font-medium border transition ${grupoFiltro === 'todos' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
+            Todos los grupos
+          </button>
+          {grupos.map(g => {
+            const c = DIA_COLORS[g.dia] || { bg: '#94A3B8', text: '#fff' }
+            const active = grupoFiltro === g.id
+            return (
+              <button key={g.id} onClick={() => setGrupoFiltro(active ? 'todos' : g.id)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition border"
+                style={{ background: active ? c.bg : '#fff', color: active ? c.text : '#475569', borderColor: active ? c.bg : '#E2E8F0' }}>
+                <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style={{ background: c.bg }}>{g.dia}</span>
+                {g.nombre}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto p-4 md:p-6">
         {loading ? (
           <div className="text-center py-16 text-slate-400">Cargando…</div>
-        ) : rows.length === 0 ? (
+        ) : filteredRows.length === 0 ? (
           <div className="text-center py-16 border-2 border-dashed border-slate-200 rounded-2xl">
             <ClipboardList className="w-10 h-10 text-slate-200 mx-auto mb-3" />
             <p className="text-slate-400 text-sm">No hay alumnas registradas</p>
@@ -114,7 +137,7 @@ export default function PagosExtraPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map(({ alumna, extras, elapsed }) => {
+                  {filteredRows.map(({ alumna, extras, elapsed }) => {
                     const completa = CONCEPTOS.every(c => extras[c] >= EXTRA_TARGET[c])
                     const c = alumna.grupo ? (DIA_COLORS[alumna.grupo.dia] || { bg: '#94A3B8', text: '#fff' }) : null
                     return (
