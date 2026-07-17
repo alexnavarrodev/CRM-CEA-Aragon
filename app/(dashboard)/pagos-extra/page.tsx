@@ -29,7 +29,7 @@ export default function PagosExtraPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     const [{ data: al }, { data: ex }, { data: col }, { data: gr }] = await Promise.all([
-      supabase.from('alumnas').select('*, grupo:grupos(*)').eq('user_id', user.id).order('nombre'),
+      supabase.from('alumnas').select('*, grupo:grupos(*)').eq('user_id', user.id).neq('status', 'baja').order('nombre'),
       supabase.from('pagos_extras').select('alumna_id, concepto, monto').eq('user_id', user.id),
       supabase.from('pagos_colegiaturas').select('alumna_id, anio, mes').eq('user_id', user.id),
       supabase.from('grupos').select('*').eq('user_id', user.id).order('dia'),
