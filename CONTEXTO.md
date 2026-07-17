@@ -71,8 +71,17 @@ netlify deploy --build --prod
 - `transferencias/` — wallet de control interno (app_kv key `wallet_entries`, vía lib/kv.ts).
 - `calendario/` — fechas de pago por grupo (app_kv key `payment_calendars_v2`) + resumen mensual.
 - `voz/` — captura por voz → `/api/voice` (OpenAI) → movimiento de caja.
-- `alumnas/` — alta/edición; **botón copiar enlace de pago**; sección Uniforme/Certificado
+- `alumnas/` — alta/edición; **botón copiar enlace de pago**; sección RCP/Uniforme/Certificado
   (barras + ajuste manual + alerta vencido).
+- `pagos-extra/` (16 jul 2026) — vista de tabla con TODAS las alumnas y sus 3 conceptos extra
+  (RCP $1,200 / Uniforme $1,500 / Certificado $7,000): botón "Falta $X" o "✓ Liquidado" por
+  columna, clic para ajustar el monto inline; la fila se pone verde cuando las 3 están
+  liquidadas. Enlace en el menú (Sidebar, "RCP/Unif./Cert.").
+- `documentacion/` (27 jun 2026) — checklist de papeles de Bachillerato por alumna: alta manual
+  con su grupo, columnas CURP/INE/FIRMA/ESTUDIOS/A.NACIMIENTO/2 FOTOS con casillas clicables;
+  la fila se pone verde cuando están los 6 documentos. Tabla `documentacion_bachillerato` (RLS
+  por user_id, SQL en `supabase-documentacion-bachillerato.sql`). Enlace en el menú (Sidebar).
+  **Pendiente portar a Atenea** (aún no se ha copiado).
 - `prospectos/`, `grupos/`, `egresadas/`, `reportes/`, `ajustes/`.
 - **`app/pagar/[token]/`** (PÚBLICA, sin login) — estado de cuenta de la alumna por su token;
   3 secciones: **Mensualidad**, **Uniforme**, **Certificado**; cada una con su botón de pago.
@@ -83,11 +92,13 @@ netlify deploy --build --prod
   `mesToBachiTipo`, `saldoPagado`, `planColegiatura`/`planBachillerato` (acumulan al mes más
   antiguo pendiente y rebosan), `mesesAdeudadosCol`/`Bachi`, `aplicaDescuentoProntoPago`
   (+constantes `PRONTO_PAGO_MONTO=50`, `PRONTO_PAGO_DIA_LIMITE=20`).
-- **`lib/extras.ts`** (PURO): uniforme/certificado. `EXTRA_TARGET` (uniforme 1500, certificado
-  7000), `EXTRA_LABEL`, plazos (`UNIFORME_MESES_LIMITE=2`, `CERTIFICADO_MES_LIMITE=8`),
-  `mesesTranscurridos`, `estadoExtra` (falta/completo/vencido/porVencer).
+- **`lib/extras.ts`** (PURO): rcp/uniforme/certificado. `EXTRA_TARGET` (rcp 1200, uniforme 1500,
+  certificado 7000), `EXTRA_LABEL`, plazos (`UNIFORME_MESES_LIMITE=2`, `CERTIFICADO_MES_LIMITE=8`,
+  RCP sin plazo), `mesesTranscurridos`, `estadoExtra` (falta/completo/vencido/porVencer).
 - **`lib/pagos-server.ts`** (SERVIDOR): `aplicarPagoAlumna` (col/bachi/ambos + descuento),
-  `aplicarPagoExtra` (uniforme/certificado → pagos_extras + caja), `enviarAvisoPago` (Resend).
+  `aplicarPagoExtra` (uniforme/certificado → pagos_extras + caja, **RCP aún NO incluido aquí**
+  — no está en el checkout público, solo se registra desde Caja/Alumnas/pagos-extra),
+  `enviarAvisoPago` (Resend).
 - **checkout**: body `{ token, concepto, monto? }`. concepto ∈ mensualidad|uniforme|certificado.
   Calcula importe en servidor; uniforme/certificado aceptan aportación parcial (`monto`).
   `external_reference = "<alumnaId>|<concepto>"`.
@@ -108,8 +119,9 @@ netlify deploy --build --prod
 - **Descuento pronto pago $50**: programa colegiaturas Y ambos (solo lado colegiatura), si
   paga antes del día 20 y el mes actual está sin pagar. El mes queda 'pagado' mostrando $1000
   (la Caja registra el dinero real). En 'ambos': bachillerato completo, colegiatura −$50.
-- **Uniforme $1500** (vence mes 2) y **Certificado $7000** (vence mes 8). Se pagan a plazos
-  (aportaciones que acumulan). Inicio de curso = mes más antiguo con registro de la alumna.
+- **Uniforme $1500** (vence mes 2), **Certificado $7000** (vence mes 8) y **RCP $1200** (sin
+  plazo/vencido). Se pagan a plazos (aportaciones que acumulan). Inicio de curso = mes más
+  antiguo con registro de la alumna.
 - **Inicio de curso por grupo** (no meter pagos antes): JMT=Nov2025, VMX=Ene2026, MML=Feb2026,
   SMX=Feb2026, VML=Abr2026, SML=May2026. Meses previos se marcan **$0/Pagado** (ya hecho).
 - **Fechas**: NUNCA `new Date('YYYY-MM-DD')` para comparar meses (UTC desfasa en UTC-6). Usar
@@ -126,6 +138,8 @@ netlify deploy --build --prod
   `auth user_metadata`, pero inflaban el JWT/cookie de sesión y el CDN devolvía HTTP 400 en
   dispositivos con sesión iniciada. Acceso vía `lib/kv.ts` (`kvGet`/`kvSet`). NO volver a meter
   datos que crecen en user_metadata. SQL: `supabase-app-kv.sql`.
+- `documentacion_bachillerato` (27 jun 2026, RLS por user_id): checklist de papeles por alumna
+  para la página `documentacion/`. SQL: `supabase-documentacion-bachillerato.sql`.
 - localStorage: `crm_categorias` (categorías de caja, por navegador).
 
 ## Mercado Pago
@@ -144,8 +158,11 @@ y el remitente del correo). Atenea aún NO tiene Mercado Pago configurado (cuent
 - **Paso 6**: WhatsApp **automático** (WhatsApp Business API) — requiere alta + costo por msg.
 - Avisos por correo (Resend): código listo, faltan `RESEND_API_KEY` + `NOTIFY_EMAIL` en Netlify.
 - Atenea: configurar su Mercado Pago cuando la esposa tenga cuenta.
+- Portar a Atenea la página `documentacion/` (checklist de Bachillerato, ver §Páginas) — aún no
+  se ha copiado, es lo único de código no fusionado a fecha 9 jul 2026.
 
 ## SQL que el usuario ya corrió (referencia)
 `supabase-pago-token.sql`, `supabase-pagos-online.sql`, `supabase-pagos-extras.sql`
 (en Aragón y Atenea). El esquema base está en `supabase-schema.sql`.
 `supabase-app-kv.sql` (tabla app_kv) — corrido en Aragón; FALTA correrlo en Atenea al portar.
+`supabase-documentacion-bachillerato.sql` — corrido en Aragón (27 jun); FALTA en Atenea.

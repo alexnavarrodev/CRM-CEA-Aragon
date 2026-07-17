@@ -27,6 +27,7 @@ export const DEFAULT_CATEGORIAS: { key: string; label: string }[] = [
   { key: 'mantenimiento', label: 'Mantenimiento' },
   { key: 'uniforme',      label: 'Uniforme' },
   { key: 'certificado',   label: 'Certificado' },
+  { key: 'rcp',           label: 'RCP' },
   { key: 'otros',         label: 'Otros' },
 ]
 
@@ -201,8 +202,8 @@ export default function CajaPage() {
       }
     }
 
-    // Acumula uniforme/certificado en pagos_extras (tope en su target)
-    const upsertExtra = async (concepto: 'uniforme' | 'certificado', montoPago: number) => {
+    // Acumula uniforme/certificado/rcp en pagos_extras (tope en su target)
+    const upsertExtra = async (concepto: 'uniforme' | 'certificado' | 'rcp', montoPago: number) => {
       if (!alumna_id || montoPago <= 0) return
       const target = EXTRA_TARGET[concepto]
       const { data: ex } = await supabase
@@ -230,6 +231,7 @@ export default function CajaPage() {
       }
       if (payload.categoria === 'uniforme') await upsertExtra('uniforme', payload.monto)
       if (payload.categoria === 'certificado') await upsertExtra('certificado', payload.monto)
+      if (payload.categoria === 'rcp') await upsertExtra('rcp', payload.monto)
     }
     setModal(false)
   }
@@ -797,7 +799,7 @@ function MovimientoModal({ categorias, onSave, onClose }: {
     // Categorías "extra" (no col/bachi) + asegura uniforme y certificado siempre
     const otras = () => {
       const filt = categorias.filter(c => !['inscripcion','colegiatura','bachillerato','ambos'].includes(c.key))
-      for (const e of [{ key: 'uniforme', label: 'Uniforme' }, { key: 'certificado', label: 'Certificado' }])
+      for (const e of [{ key: 'uniforme', label: 'Uniforme' }, { key: 'certificado', label: 'Certificado' }, { key: 'rcp', label: 'RCP' }])
         if (!filt.some(c => c.key === e.key)) filt.push(e)
       return filt
     }

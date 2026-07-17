@@ -2,16 +2,19 @@
 
 export const UNIFORME_TARGET = 1500
 export const CERTIFICADO_TARGET = 7000
+export const RCP_TARGET = 1200
 export const UNIFORME_MESES_LIMITE = 2   // pagar en los primeros 2 meses
 export const CERTIFICADO_MES_LIMITE = 8  // liquidado para el mes 8
 
 export const EXTRA_TARGET: Record<string, number> = {
   uniforme: UNIFORME_TARGET,
   certificado: CERTIFICADO_TARGET,
+  rcp: RCP_TARGET,
 }
 export const EXTRA_LABEL: Record<string, string> = {
   uniforme: 'Uniforme',
   certificado: 'Certificado',
+  rcp: 'RCP',
 }
 
 export interface PagoExtra { concepto: string; monto: number; estado: string }

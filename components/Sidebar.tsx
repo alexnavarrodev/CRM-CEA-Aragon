@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import {
   LayoutDashboard, CreditCard, GraduationCap, Wallet,
   UserPlus, Users, UserCheck, UsersRound, BarChart2, Settings, LogOut, Search, Mic,
-  ArrowRightLeft, CalendarDays, MessageCircle, ClipboardCheck,
+  ArrowRightLeft, CalendarDays, MessageCircle, ClipboardCheck, ClipboardList,
 } from 'lucide-react'
 
 const nav = [
@@ -17,6 +17,7 @@ const nav = [
       { href: '/colegiaturas',    label: 'Colegiaturas',   icon: CreditCard },
       { href: '/bachillerato',    label: 'Bachillerato',   icon: GraduationCap },
       { href: '/documentacion',   label: 'Doc. Bachillerato', icon: ClipboardCheck },
+      { href: '/pagos-extra',     label: 'RCP/Unif./Cert.', icon: ClipboardList },
       { href: '/caja',            label: 'Caja',           icon: Wallet },
       { href: '/por-cobrar',      label: 'Por cobrar',     icon: MessageCircle },
       { href: '/transferencias',  label: 'Transferencias', icon: ArrowRightLeft },

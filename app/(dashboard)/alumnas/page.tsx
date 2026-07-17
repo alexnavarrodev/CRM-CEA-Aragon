@@ -6,7 +6,7 @@ import { Alumna, Grupo, AlumnaStatus, AlumnaPrograma, DIA_COLORS } from '@/lib/t
 import { Plus, X, Users, Phone, Mail, Search, Link2, Check, AlertTriangle } from 'lucide-react'
 import { EXTRA_TARGET, EXTRA_LABEL, estadoExtra, mesesTranscurridos } from '@/lib/extras'
 
-type ExtrasAlumna = { uniforme: number; certificado: number }
+type ExtrasAlumna = { uniforme: number; certificado: number; rcp: number }
 
 const STATUS_STYLES: Record<AlumnaStatus, { label: string; className: string }> = {
   activa:   { label: 'Activa',   className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
@@ -56,9 +56,9 @@ export default function AlumnasPage() {
     // Mapa de extras por alumna
     const exMap: Record<string, ExtrasAlumna> = {}
     ;(ex ?? []).forEach(p => {
-      if (!exMap[p.alumna_id]) exMap[p.alumna_id] = { uniforme: 0, certificado: 0 }
-      const c = p.concepto as 'uniforme' | 'certificado'
-      if (c === 'uniforme' || c === 'certificado') exMap[p.alumna_id][c] = Number(p.monto)
+      if (!exMap[p.alumna_id]) exMap[p.alumna_id] = { uniforme: 0, certificado: 0, rcp: 0 }
+      const c = p.concepto as 'uniforme' | 'certificado' | 'rcp'
+      if (c === 'uniforme' || c === 'certificado' || c === 'rcp') exMap[p.alumna_id][c] = Number(p.monto)
     })
     setExtras(exMap)
     // Inicio de curso = mes más antiguo con registro de colegiatura
@@ -97,7 +97,7 @@ export default function AlumnasPage() {
   const handleSaveExtras = async (alumnaId: string, vals: ExtrasAlumna) => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    for (const concepto of ['uniforme', 'certificado'] as const) {
+    for (const concepto of ['uniforme', 'certificado', 'rcp'] as const) {
       const monto = Math.max(0, Math.min(EXTRA_TARGET[concepto], vals[concepto]))
       const estado = monto >= EXTRA_TARGET[concepto] ? 'pagado' : monto > 0 ? 'parcial' : 'pendiente'
       const { data: ex } = await supabase.from('pagos_extras')
@@ -270,7 +270,7 @@ export default function AlumnasPage() {
         <AlumnaModal
           alumna={modal === 'new' ? null : modal}
           grupos={grupos}
-          extras={modal !== 'new' ? (extras[modal.id] ?? { uniforme: 0, certificado: 0 }) : { uniforme: 0, certificado: 0 }}
+          extras={modal !== 'new' ? (extras[modal.id] ?? { uniforme: 0, certificado: 0, rcp: 0 }) : { uniforme: 0, certificado: 0, rcp: 0 }}
           inicio={modal !== 'new' ? inicio[modal.id] : undefined}
           onSave={handleSave}
           onSaveExtras={handleSaveExtras}
@@ -293,6 +293,7 @@ function AlumnaModal({ alumna, grupos, extras, inicio, onSave, onSaveExtras, onB
 }) {
   const [uniforme, setUniforme] = useState(String(extras.uniforme ?? 0))
   const [certificado, setCertificado] = useState(String(extras.certificado ?? 0))
+  const [rcp, setRcp] = useState(String(extras.rcp ?? 0))
   const [nombre, setNombre] = useState(alumna?.nombre ?? '')
   const [telefono, setTelefono] = useState(alumna?.telefono ?? '')
   const [email, setEmail] = useState(alumna?.email ?? '')
@@ -310,6 +311,7 @@ function AlumnaModal({ alumna, grupos, extras, inicio, onSave, onSaveExtras, onB
       onSaveExtras(alumna.id, {
         uniforme: parseFloat(uniforme) || 0,
         certificado: parseFloat(certificado) || 0,
+        rcp: parseFloat(rcp) || 0,
       })
     }
     onSave({
@@ -331,6 +333,7 @@ function AlumnaModal({ alumna, grupos, extras, inicio, onSave, onSaveExtras, onB
   const elapsed = inicio ? mesesTranscurridos(inicio.anio, inicio.mes, now.getUTCFullYear(), now.getUTCMonth() + 1) : null
   const stUniforme = estadoExtra('uniforme', parseFloat(uniforme) || 0, elapsed)
   const stCertificado = estadoExtra('certificado', parseFloat(certificado) || 0, elapsed)
+  const stRcp = estadoExtra('rcp', parseFloat(rcp) || 0, elapsed)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
@@ -414,6 +417,7 @@ function AlumnaModal({ alumna, grupos, extras, inicio, onSave, onSaveExtras, onB
               {([
                 { key: 'uniforme' as const, st: stUniforme, val: uniforme, set: setUniforme },
                 { key: 'certificado' as const, st: stCertificado, val: certificado, set: setCertificado },
+                { key: 'rcp' as const, st: stRcp, val: rcp, set: setRcp },
               ]).map(({ key, st, val, set }) => {
                 const pct = Math.min(100, Math.round((st.pagado / st.target) * 100))
                 return (
@@ -444,7 +448,7 @@ function AlumnaModal({ alumna, grupos, extras, inicio, onSave, onSaveExtras, onB
                   </div>
                 )
               })}
-              <p className="text-[11px] text-slate-400">Se actualiza solo al registrar pagos de Uniforme/Certificado en Caja; aquí puedes ajustarlo a mano.</p>
+              <p className="text-[11px] text-slate-400">Se actualiza solo al registrar pagos de RCP/Uniforme/Certificado en Caja; aquí puedes ajustarlo a mano.</p>
             </div>
           )}
 
