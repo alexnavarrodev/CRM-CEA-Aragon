@@ -87,7 +87,7 @@ export default function BachilleratoPage() {
       const gInicio = g?.anio_inicio && g?.mes_inicio ? g.anio_inicio * 12 + g.mes_inicio : (2025 * 12 + 11)
       if (gInicio < minKey) minKey = gInicio
       Object.entries(pagos[a.id] ?? {}).forEach(([key, p]) => {
-        if (p.estado === 'pagado' && Number(p.monto) === 0) return // placeholder viejo, ignorar
+        if (Number(p.monto) === 0) return // $0 (placeholder viejo o "pendiente" vacío) no cuenta como registro real
         const [anioStr, tipoStr] = key.split('-')
         const k = Number(anioStr) * 12 + (TIPOS.indexOf(tipoStr as TipoMes) + 1)
         if (k < minKey) minKey = k
@@ -315,7 +315,7 @@ export default function BachilleratoPage() {
                         const isCurrent = col.anio === HOY.getFullYear() && col.tipo === tipoActual
                         const colKeyNum = col.anio * 12 + (TIPOS.indexOf(col.tipo) + 1)
                         const pago = pagoAlumna[col.key]
-                        const antesDeInicio = inicioKey !== null && colKeyNum < inicioKey && !pago
+                        const antesDeInicio = inicioKey !== null && colKeyNum < inicioKey && (!pago || Number(pago.monto) === 0)
                         if (antesDeInicio) {
                           return (
                             <td key={col.key} className={`px-1 py-2 text-center ${isFirstOfYear ? 'border-l border-slate-100' : ''}`}>
