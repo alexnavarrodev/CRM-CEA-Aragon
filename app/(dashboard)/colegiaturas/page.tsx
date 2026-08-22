@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Alumna, Grupo, PagoColegiatura, MESES, PagoEstado, DIA_COLORS } from '@/lib/types'
 import { hoyMX } from '@/lib/fecha'
@@ -79,8 +79,33 @@ export default function ColegiatutasPage() {
     return true
   })
 
+  // Recorta la cuadrícula: arranca en el mes más antiguo que realmente hace falta ver,
+  // según el inicio de los grupos visibles y cualquier pago real que ya exista antes de eso.
+  const columnasVisibles = useMemo(() => {
+    if (alumnasFiltradas.length === 0) return COLUMNAS
+    let minKey = Infinity
+    alumnasFiltradas.forEach(a => {
+      const g = a.grupo as Grupo | undefined
+      const gInicio = g?.anio_inicio && g?.mes_inicio ? g.anio_inicio * 12 + g.mes_inicio : (2025 * 12 + 11)
+      if (gInicio < minKey) minKey = gInicio
+      Object.entries(pagos[a.id] ?? {}).forEach(([key, p]) => {
+        if (p.estado === 'pagado' && Number(p.monto) === 0) return // placeholder viejo, ignorar
+        const [anioStr, mesStr] = key.split('-')
+        const k = Number(anioStr) * 12 + Number(mesStr)
+        if (k < minKey) minKey = k
+      })
+    })
+    return COLUMNAS.filter(c => c.anio * 12 + c.mes >= minKey)
+  }, [alumnasFiltradas, pagos])
+
+  const yearGroupsVisibles = useMemo(() => {
+    const map = new Map<number, number>()
+    columnasVisibles.forEach(c => map.set(c.anio, (map.get(c.anio) ?? 0) + 1))
+    return Array.from(map.entries()).map(([anio, count]) => ({ anio, count }))
+  }, [columnasVisibles])
+
   // Totales por columna
-  const totalesCol = COLUMNAS.map(col =>
+  const totalesCol = columnasVisibles.map(col =>
     alumnasFiltradas.reduce((sum, a) => {
       const p = pagos[a.id]?.[col.key]
       return sum + (p ? Number(p.monto) : 0)
@@ -196,7 +221,7 @@ export default function ColegiatutasPage() {
                   className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-52 sticky left-0 bg-slate-50/90 border-b border-slate-100 z-10">
                   ALUMNA · GRUPO
                 </th>
-                {YEAR_GROUPS.map(yg => (
+                {yearGroupsVisibles.map(yg => (
                   <th key={yg.anio} colSpan={yg.count}
                     className="text-center py-2 text-xs font-bold text-slate-600 border-b border-slate-100 border-l border-slate-200 bg-slate-50/80">
                     {yg.anio}
@@ -205,9 +230,9 @@ export default function ColegiatutasPage() {
               </tr>
               {/* Row 2: month labels */}
               <tr className="bg-slate-50/60 border-b border-slate-100">
-                {COLUMNAS.map((col, i) => {
+                {columnasVisibles.map((col, i) => {
                   const isCurrent = col.anio === HOY.getFullYear() && col.mes === HOY.getMonth() + 1
-                  const isFirstOfYear = col.mes === (col.anio === 2025 ? 11 : 1)
+                  const isFirstOfYear = i === 0 || columnasVisibles[i - 1].anio !== col.anio
                   return (
                     <th key={col.key}
                       className={`text-center px-1 py-2 min-w-[72px] ${isCurrent ? 'bg-blue-50/80' : ''} ${isFirstOfYear ? 'border-l border-slate-200' : ''}`}>
@@ -223,9 +248,9 @@ export default function ColegiatutasPage() {
 
             <tbody>
               {loading ? (
-                <tr><td colSpan={COLUMNAS.length + 1} className="text-center py-16 text-slate-400">Cargando...</td></tr>
+                <tr><td colSpan={columnasVisibles.length + 1} className="text-center py-16 text-slate-400">Cargando...</td></tr>
               ) : alumnasFiltradas.length === 0 ? (
-                <tr><td colSpan={COLUMNAS.length + 1} className="text-center py-16 text-slate-400">No hay alumnas en este grupo</td></tr>
+                <tr><td colSpan={columnasVisibles.length + 1} className="text-center py-16 text-slate-400">No hay alumnas en este grupo</td></tr>
               ) : (
                 (() => {
                   const DIA_ORDER = ['MAR','MIE','JUE','VIE','SAB','DOM']
@@ -246,7 +271,7 @@ export default function ColegiatutasPage() {
 
                   return grupos.flatMap(grupo => [
                     <tr key={`gh-${grupo.id}`}>
-                      <td colSpan={COLUMNAS.length + 1}
+                      <td colSpan={columnasVisibles.length + 1}
                         className="px-5 py-1.5 text-xs font-bold uppercase tracking-widest text-white sticky left-0"
                         style={{ backgroundColor: DIA_COLORS[grupo.dia]?.bg ?? '#64748B' }}>
                         {grupo.nombre}
@@ -261,9 +286,9 @@ export default function ColegiatutasPage() {
                         <div className="font-medium text-slate-800 text-sm">{alumna.nombre}</div>
                         <div className="text-xs text-slate-400">${Number(alumna.cuota_mensual).toLocaleString('es-MX')}/mes</div>
                       </td>
-                      {COLUMNAS.map(col => {
+                      {columnasVisibles.map((col, i) => {
                         const isCurrent = col.anio === HOY.getFullYear() && col.mes === HOY.getMonth() + 1
-                        const isFirstOfYear = col.mes === (col.anio === 2025 ? 11 : 1)
+                        const isFirstOfYear = i === 0 || columnasVisibles[i - 1].anio !== col.anio
                         const pago = pagos[alumna.id]?.[col.key]
                         const antesDeInicio = inicioKey !== null && (col.anio * 12 + col.mes) < inicioKey && !pago
                         if (antesDeInicio) {

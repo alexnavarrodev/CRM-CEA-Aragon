@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Alumna, Grupo, PagoBachillerato, PagoEstado, DIA_COLORS } from '@/lib/types'
 import { hoyMX } from '@/lib/fecha'
@@ -76,6 +76,31 @@ export default function BachilleratoPage() {
     (!busqueda || a.nombre.toLowerCase().includes(busqueda.toLowerCase())) &&
     (grupoFiltro === 'todos' || a.grupo_id === grupoFiltro)
   )
+
+  // Recorta la cuadrícula: arranca en el mes más antiguo que realmente hace falta ver,
+  // según el inicio de los grupos visibles y cualquier pago real que ya exista antes de eso.
+  const columnasVisibles = useMemo(() => {
+    if (alumnasFiltradas.length === 0) return COLUMNAS
+    let minKey = Infinity
+    alumnasFiltradas.forEach(a => {
+      const g = a.grupo as Grupo | undefined
+      const gInicio = g?.anio_inicio && g?.mes_inicio ? g.anio_inicio * 12 + g.mes_inicio : (2025 * 12 + 11)
+      if (gInicio < minKey) minKey = gInicio
+      Object.entries(pagos[a.id] ?? {}).forEach(([key, p]) => {
+        if (p.estado === 'pagado' && Number(p.monto) === 0) return // placeholder viejo, ignorar
+        const [anioStr, tipoStr] = key.split('-')
+        const k = Number(anioStr) * 12 + (TIPOS.indexOf(tipoStr as TipoMes) + 1)
+        if (k < minKey) minKey = k
+      })
+    })
+    return COLUMNAS.filter(c => c.anio * 12 + (TIPOS.indexOf(c.tipo) + 1) >= minKey)
+  }, [alumnasFiltradas, pagos])
+
+  const yearGroupsVisibles = useMemo(() => {
+    const map = new Map<number, number>()
+    columnasVisibles.forEach(c => map.set(c.anio, (map.get(c.anio) ?? 0) + 1))
+    return Array.from(map.entries()).map(([anio, count]) => ({ anio, count }))
+  }, [columnasVisibles])
 
   // KPIs
   const totalPagado = alumnas.reduce((sum, a) => {
@@ -214,7 +239,7 @@ export default function BachilleratoPage() {
                 <th rowSpan={2} className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-52 sticky left-0 bg-slate-50/90 border-b border-slate-100">
                   ALUMNA
                 </th>
-                {YEAR_GROUPS.map(({ anio, count }) => (
+                {yearGroupsVisibles.map(({ anio, count }) => (
                   <th key={anio} colSpan={count} className="text-center py-2 text-xs font-bold text-slate-600 border-l border-slate-200">
                     {anio}
                   </th>
@@ -222,9 +247,9 @@ export default function BachilleratoPage() {
               </tr>
               {/* Row 2: Month labels */}
               <tr className="border-b border-slate-100 bg-slate-50/60">
-                {COLUMNAS.map(col => {
+                {columnasVisibles.map((col, i) => {
                   const isCurrentMonth = col.anio === HOY.getFullYear() && col.tipo === tipoActual
-                  const isFirstOfYear = col.tipo === (col.anio === 2025 ? 'nov' : 'ene')
+                  const isFirstOfYear = i === 0 || columnasVisibles[i - 1].anio !== col.anio
                   return (
                     <th
                       key={col.key}
@@ -241,10 +266,10 @@ export default function BachilleratoPage() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={COLUMNAS.length + 1} className="text-center py-16 text-slate-400">Cargando...</td></tr>
+                <tr><td colSpan={columnasVisibles.length + 1} className="text-center py-16 text-slate-400">Cargando...</td></tr>
               ) : alumnasFiltradas.length === 0 ? (
                 <tr>
-                  <td colSpan={COLUMNAS.length + 1} className="text-center py-16">
+                  <td colSpan={columnasVisibles.length + 1} className="text-center py-16">
                     <GraduationCap className="w-10 h-10 text-slate-200 mx-auto mb-3" />
                     <p className="text-slate-400 text-sm">No hay alumnas en bachillerato</p>
                     <p className="text-slate-300 text-xs mt-1">Agrega alumnas con programa "bachillerato" o "ambos"</p>
@@ -270,7 +295,7 @@ export default function BachilleratoPage() {
 
                   return grupos.flatMap(grupo => [
                     <tr key={`gh-${grupo.id}`}>
-                      <td colSpan={COLUMNAS.length + 1}
+                      <td colSpan={columnasVisibles.length + 1}
                         className="px-5 py-1.5 text-xs font-bold uppercase tracking-widest text-white sticky left-0"
                         style={{ backgroundColor: DIA_COLORS[grupo.dia]?.bg ?? '#64748B' }}>
                         {grupo.nombre}
@@ -285,8 +310,8 @@ export default function BachilleratoPage() {
                       <td className="px-5 py-3 sticky left-0 bg-white">
                         <div className="font-medium text-slate-800">{alumna.nombre}</div>
                       </td>
-                      {COLUMNAS.map(col => {
-                        const isFirstOfYear = col.tipo === (col.anio === 2025 ? 'nov' : 'ene')
+                      {columnasVisibles.map((col, i) => {
+                        const isFirstOfYear = i === 0 || columnasVisibles[i - 1].anio !== col.anio
                         const isCurrent = col.anio === HOY.getFullYear() && col.tipo === tipoActual
                         const colKeyNum = col.anio * 12 + (TIPOS.indexOf(col.tipo) + 1)
                         const pago = pagoAlumna[col.key]
