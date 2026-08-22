@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Alumna, Grupo, PagoBachillerato, PagoEstado, DIA_COLORS } from '@/lib/types'
 import { hoyMX } from '@/lib/fecha'
 import { Check, Plus, X, GraduationCap, ChevronDown, ChevronUp } from 'lucide-react'
+import { useBackdropClose } from '@/lib/useBackdropClose'
 
 const TIPOS = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'] as const
 type TipoMes = typeof TIPOS[number]
@@ -277,16 +278,27 @@ export default function BachilleratoPage() {
                     </tr>,
                     ...grupo.alumnas.map(alumna => {
                   const pagoAlumna = pagos[alumna.id] ?? {}
+                  const g = alumna.grupo as Grupo | undefined
+                  const inicioKey = g?.anio_inicio && g?.mes_inicio ? g.anio_inicio * 12 + g.mes_inicio : null
                   return (
                     <tr key={alumna.id} className="border-t border-slate-50 hover:bg-slate-50/40 transition">
                       <td className="px-5 py-3 sticky left-0 bg-white">
                         <div className="font-medium text-slate-800">{alumna.nombre}</div>
                       </td>
                       {COLUMNAS.map(col => {
-                        const pago = pagoAlumna[col.key]
-                        const estado = (pago?.estado ?? 'pendiente') as PagoEstado
                         const isFirstOfYear = col.tipo === (col.anio === 2025 ? 'nov' : 'ene')
                         const isCurrent = col.anio === HOY.getFullYear() && col.tipo === tipoActual
+                        const colKeyNum = col.anio * 12 + (TIPOS.indexOf(col.tipo) + 1)
+                        const pago = pagoAlumna[col.key]
+                        const antesDeInicio = inicioKey !== null && colKeyNum < inicioKey && !pago
+                        if (antesDeInicio) {
+                          return (
+                            <td key={col.key} className={`px-1 py-2 text-center ${isFirstOfYear ? 'border-l border-slate-100' : ''}`}>
+                              <span className="block w-full text-center text-slate-200 text-xs select-none" title="Antes del inicio del grupo">·</span>
+                            </td>
+                          )
+                        }
+                        const estado = (pago?.estado ?? 'pendiente') as PagoEstado
                         if (!filtroEstado.includes(estado)) {
                           return <td key={col.key} className={`px-1 py-2 ${isFirstOfYear ? 'border-l border-slate-100' : ''} ${isCurrent ? 'bg-blue-50/20' : ''}`} />
                         }
@@ -355,9 +367,10 @@ function BachiModal({ alumna, anio, tipo, existing, onSave, onClose }: {
     // Permite $0 + 'pagado' (para marcar meses anteriores al inicio del grupo)
     onSave(parseFloat(monto) || 0, estado)
   }
+  const backdrop = useBackdropClose(onClose)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" {...backdrop}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 animate-fade-in" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <div>

@@ -155,6 +155,25 @@ export async function aplicarPagoExtra(
   return { categoria: concepto }
 }
 
+/** Pago de inscripción de un prospecto nuevo (sin alumna todavía): marca el prospecto
+ *  como "inscrito" e inserta el movimiento en caja, sin alumna_id (aún no existe). */
+export async function aplicarInscripcion(
+  supabase: SupabaseClient,
+  prospecto: { id: string; user_id: string; nombre: string },
+  monto: number,
+  canal: string,
+  fecha: string,
+) {
+  await supabase.from('prospectos').update({ status: 'inscrito' }).eq('id', prospecto.id)
+  await supabase.from('movimientos_caja').insert({
+    user_id: prospecto.user_id,
+    tipo: 'ingreso',
+    concepto: `Inscripción — ${prospecto.nombre}`,
+    monto, canal, categoria: 'inscripcion', fecha, alumna_id: null,
+  })
+  return { categoria: 'inscripcion' }
+}
+
 // ── Aviso por correo de pago recibido (Resend). No bloquea si falla. ─────────
 export async function enviarAvisoPago(opts: {
   nombre: string; monto: number; categoria: string; canal: string
@@ -166,7 +185,8 @@ export async function enviarAvisoPago(opts: {
   const catLabel =
     opts.categoria === 'ambos' ? 'Colegiatura + Bachillerato' :
     opts.categoria === 'colegiatura' ? 'Colegiatura' :
-    opts.categoria === 'bachillerato' ? 'Bachillerato' : opts.categoria
+    opts.categoria === 'bachillerato' ? 'Bachillerato' :
+    opts.categoria === 'inscripcion' ? 'Inscripción (prospecto nuevo)' : opts.categoria
   const monto = `$${Math.round(opts.monto).toLocaleString('es-MX')}`
 
   try {

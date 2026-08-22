@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Grupo, DIA_COLORS } from '@/lib/types'
+import { Grupo, DIA_COLORS, MESES_FULL } from '@/lib/types'
 import { Plus, X, Trash2, UsersRound, Clock, User } from 'lucide-react'
+import { useBackdropClose } from '@/lib/useBackdropClose'
 
 const DIAS = ['LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB', 'DOM']
 const DIA_NAMES: Record<string, string> = {
@@ -169,6 +170,9 @@ function GrupoModal({ grupo, onSave, onClose }: {
   const [dia, setDia] = useState(grupo?.dia ?? 'MAR')
   const [horario, setHorario] = useState(grupo?.horario ?? '')
   const [maestra, setMaestra] = useState(grupo?.maestra ?? '')
+  const hoy = new Date()
+  const [anioInicio, setAnioInicio] = useState<number>(grupo?.anio_inicio ?? hoy.getFullYear())
+  const [mesInicio, setMesInicio] = useState<number>(grupo?.mes_inicio ?? (hoy.getMonth() + 1))
 
   const handleSubmit = () => {
     if (!nombre.trim()) return
@@ -178,13 +182,16 @@ function GrupoModal({ grupo, onSave, onClose }: {
       horario: horario || null,
       maestra: maestra || null,
       color: DIA_COLORS[dia]?.bg ?? '#94A3B8',
+      anio_inicio: anioInicio,
+      mes_inicio: mesInicio,
     })
   }
 
   const c = DIA_COLORS[dia] || { bg: '#94A3B8' }
+  const backdrop = useBackdropClose(onClose)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" {...backdrop}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 animate-fade-in" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <h3 className="font-semibold text-slate-900">{grupo ? 'Editar grupo' : 'Nuevo grupo'}</h3>
@@ -244,6 +251,27 @@ function GrupoModal({ grupo, onSave, onClose }: {
               placeholder="Nombre del docente"
               className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Inicio de clases</label>
+            <div className="flex gap-2">
+              <select
+                value={mesInicio}
+                onChange={e => setMesInicio(Number(e.target.value))}
+                className="flex-1 px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                {MESES_FULL.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+              </select>
+              <select
+                value={anioInicio}
+                onChange={e => setAnioInicio(Number(e.target.value))}
+                className="w-24 px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                {[2025, 2026, 2027].map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">Las cuadrículas de Colegiaturas y Bachillerato ocultarán los meses anteriores a este.</p>
           </div>
 
           <div className="flex gap-3 pt-1">

@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Alumna, Grupo, PagoColegiatura, MESES, PagoEstado, DIA_COLORS } from '@/lib/types'
 import { hoyMX } from '@/lib/fecha'
 import { Plus, Check, X, ChevronDown, ChevronUp } from 'lucide-react'
+import { useBackdropClose } from '@/lib/useBackdropClose'
 
 // ─── Rango NOV 2025 → DIC 2027 ───────────────────────────────────────────────
 type Columna = { anio: number; mes: number; label: string; key: string }
@@ -251,7 +252,10 @@ export default function ColegiatutasPage() {
                         {grupo.nombre}
                       </td>
                     </tr>,
-                    ...grupo.alumnas.map(alumna => (
+                    ...grupo.alumnas.map(alumna => {
+                    const g = alumna.grupo as Grupo | undefined
+                    const inicioKey = g?.anio_inicio && g?.mes_inicio ? g.anio_inicio * 12 + g.mes_inicio : null
+                    return (
                     <tr key={alumna.id} className="border-t border-slate-50 hover:bg-slate-50/40 transition">
                       <td className="px-5 py-2.5 sticky left-0 bg-white border-r border-slate-100">
                         <div className="font-medium text-slate-800 text-sm">{alumna.nombre}</div>
@@ -261,6 +265,14 @@ export default function ColegiatutasPage() {
                         const isCurrent = col.anio === HOY.getFullYear() && col.mes === HOY.getMonth() + 1
                         const isFirstOfYear = col.mes === (col.anio === 2025 ? 11 : 1)
                         const pago = pagos[alumna.id]?.[col.key]
+                        const antesDeInicio = inicioKey !== null && (col.anio * 12 + col.mes) < inicioKey && !pago
+                        if (antesDeInicio) {
+                          return (
+                            <td key={col.key} className={`px-1 py-2 text-center ${isFirstOfYear ? 'border-l border-slate-100' : ''}`}>
+                              <span className="block w-full text-center text-slate-200 text-xs select-none" title="Antes del inicio del grupo">·</span>
+                            </td>
+                          )
+                        }
                         const estado = pago?.estado ?? 'pendiente'
                         if (!filtroEstado.includes(estado)) {
                           return <td key={col.key} className={`px-1 py-2 ${isFirstOfYear ? 'border-l border-slate-100' : ''} ${isCurrent ? 'bg-blue-50/20' : ''}`} />
@@ -292,7 +304,7 @@ export default function ColegiatutasPage() {
                         )
                       })}
                     </tr>
-                  ))])
+                  )})])
                 })()
               )}
             </tbody>
@@ -321,9 +333,10 @@ function PaymentModal({ alumna, anio, mes, existing, onSave, onClose }: {
   const [monto, setMonto] = useState(existing?.monto?.toString() ?? alumna.cuota_mensual.toString())
   const [estado, setEstado] = useState<PagoEstado>(existing?.estado ?? 'pagado')
   const mesNombre = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][mes - 1]
+  const backdrop = useBackdropClose(onClose)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" {...backdrop}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 animate-fade-in" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <div>

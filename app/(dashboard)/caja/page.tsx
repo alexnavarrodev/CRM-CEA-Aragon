@@ -7,6 +7,7 @@ import { mesToBachiTipo, planColegiatura, planBachillerato } from '@/lib/acumula
 import { EXTRA_TARGET } from '@/lib/extras'
 import { gananciaBachiDelMes } from '@/lib/margen'
 import { hoyMX } from '@/lib/fecha'
+import { useBackdropClose } from '@/lib/useBackdropClose'
 import {
   Plus, TrendingUp, TrendingDown, X, ArrowUpRight, ArrowDownRight,
   User, Trash2, Pencil, ChevronDown, ChevronUp, Tag, Check,
@@ -236,16 +237,43 @@ export default function CajaPage() {
     setModal(false)
   }
 
-  const handleUpdate = async (id: string, changes: {
+  const handleUpdate = async (original: MovRow, changes: {
     tipo: MovimientoTipo; concepto: string; monto: number
     canal: string; categoria: string; fecha: string
   }) => {
     const { data: row } = await supabase
       .from('movimientos_caja')
-      .update(changes).eq('id', id)
+      .update(changes).eq('id', original.id)
       .select('*, alumna:alumnas(nombre)').single()
-    if (row) setMovimientos(prev => prev.map(m => m.id === id ? row as MovRow : m))
+    if (row) setMovimientos(prev => prev.map(m => m.id === original.id ? row as MovRow : m))
     setEditModal(null)
+
+    // Si el movimiento pertenece a una alumna y su categoría (antes o después de editar) es
+    // un "extra" (uniforme/certificado/rcp), resincroniza pagos_extras sumando TODOS sus
+    // movimientos de esa categoría — evita que quede desfasado tras cambiar monto/categoría
+    // desde este modal (que, a diferencia de "Nuevo movimiento", no acumulaba el pago).
+    const alumnaId = original.alumna_id
+    if (alumnaId) {
+      const conceptosTocados = new Set(
+        [original.categoria, changes.categoria].filter(c => c in EXTRA_TARGET) as ('uniforme' | 'certificado' | 'rcp')[]
+      )
+      for (const concepto of conceptosTocados) {
+        const { data: movs } = await supabase.from('movimientos_caja')
+          .select('monto').eq('alumna_id', alumnaId).eq('categoria', concepto).eq('tipo', 'ingreso')
+        const total = (movs ?? []).reduce((s, m) => s + Number(m.monto), 0)
+        const target = EXTRA_TARGET[concepto]
+        const monto = Math.min(target, total)
+        const estado = monto >= target ? 'pagado' : monto > 0 ? 'parcial' : 'pendiente'
+        const { data: ex } = await supabase.from('pagos_extras')
+          .select('id').eq('alumna_id', alumnaId).eq('concepto', concepto).maybeSingle()
+        if (ex) {
+          await supabase.from('pagos_extras').update({ monto, estado }).eq('id', ex.id)
+        } else {
+          await supabase.from('pagos_extras')
+            .insert({ user_id: original.user_id, alumna_id: alumnaId, concepto, monto, estado })
+        }
+      }
+    }
   }
 
   const handleDelete = async (id: string) => {
@@ -466,7 +494,7 @@ export default function CajaPage() {
         <EditModal
           movimiento={editModal}
           categorias={categorias}
-          onSave={(changes) => handleUpdate(editModal.id, changes)}
+          onSave={(changes) => handleUpdate(editModal, changes)}
           onClose={() => setEditModal(null)}
         />
       )}
@@ -552,9 +580,10 @@ function CategoriaModal({ categorias, catsEnUso, onSave, onClose }: {
     onSave(cats)
     onClose()
   }
+  const backdrop = useBackdropClose(onClose)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" {...backdrop}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
@@ -688,9 +717,10 @@ function EditModal({ movimiento, categorias, onSave, onClose }: {
     { key: 'efectivo', label: 'Efectivo' }, { key: 'transferencia', label: 'Transferencia' },
     { key: 'tarjeta', label: 'Tarjeta' }, { key: 'mixto', label: 'Mixto' },
   ]
+  const backdrop = useBackdropClose(onClose)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" {...backdrop}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 sticky top-0 bg-white">
           <div>
@@ -833,11 +863,15 @@ function MovimientoModal({ categorias, onSave, onClose }: {
     if (!alumna) return
     const mesLabel = MESES[mes - 1]
     if (categoria === 'colegiatura') setConcepto(`Colegiatura ${alumna.nombre} — ${mesLabel}`)
-    if (categoria === 'bachillerato') {
+    else if (categoria === 'bachillerato') {
       const bc = BACHI_CONCEPTOS.find(b => b.key === tipoBachi)
       setConcepto(`Bachillerato ${alumna.nombre} — ${bc?.label ?? tipoBachi}`)
     }
-    if (categoria === 'ambos') setConcepto(`Col.+Bachi ${alumna.nombre} — ${mesLabel}`)
+    else if (categoria === 'ambos') setConcepto(`Col.+Bachi ${alumna.nombre} — ${mesLabel}`)
+    else if (categoria === 'uniforme') setConcepto(`Uniforme ${alumna.nombre}`)
+    else if (categoria === 'certificado') setConcepto(`Certificado ${alumna.nombre}`)
+    else if (categoria === 'rcp') setConcepto(`RCP ${alumna.nombre}`)
+    else setConcepto(alumna.nombre)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alumna?.id, categoria, mes, tipoBachi])
 
@@ -845,9 +879,10 @@ function MovimientoModal({ categorias, onSave, onClose }: {
     if (!concepto.trim() || !monto) return
     onSave({ tipo, concepto: concepto.trim(), monto: montoNum, canal, categoria, fecha, alumna_id: alumnaId || null, mes, tipoBachi })
   }
+  const backdrop = useBackdropClose(onClose)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" {...backdrop}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 sticky top-0 bg-white">
           <h3 className="font-semibold text-slate-900">Nuevo movimiento</h3>

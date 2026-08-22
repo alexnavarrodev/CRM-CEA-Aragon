@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Prospecto, ProspectoStatus, PROSPECTO_ESTADOS } from '@/lib/types'
 import { hoyMX } from '@/lib/fecha'
 import { Plus, X, UserPlus, Phone, Mail, MessageCircle } from 'lucide-react'
+import { useBackdropClose } from '@/lib/useBackdropClose'
 
 const COLUMNAS: ProspectoStatus[] = ['nuevo', 'contactado', 'interesado', 'inscrito', 'no_interesado']
 
@@ -189,9 +190,10 @@ function ProspectoModal({ prospecto, onSave, onDelete, onClose }: {
     if (!nombre.trim()) return
     onSave({ nombre: nombre.trim(), telefono: telefono || null, email: email || null, interes, status, notas: notas || null, fecha_contacto: fecha })
   }
+  const backdrop = useBackdropClose(onClose)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" {...backdrop}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-fade-in" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <div>

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Grupo, DIA_COLORS } from '@/lib/types'
 import { Plus, X, Trash2, Check, ClipboardCheck } from 'lucide-react'
+import { useBackdropClose } from '@/lib/useBackdropClose'
 
 // ─── Documentos (mismas columnas que la hoja) ────────────────────────────────
 const DOCS = [
@@ -61,14 +62,16 @@ export default function DocumentacionPage() {
     await supabase.from('documentacion_bachillerato').update({ [key]: nuevo }).eq('id', row.id)
   }
 
-  const handleAdd = async (nombre: string, grupoId: string | null) => {
+  const handleAdd = async (nombre: string, grupoId: string | null): Promise<string | null> => {
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    const { data } = await supabase.from('documentacion_bachillerato')
+    if (!user) return 'No hay sesión activa.'
+    const { data, error } = await supabase.from('documentacion_bachillerato')
       .insert({ user_id: user.id, nombre, grupo_id: grupoId })
       .select('*, grupo:grupos(*)').single()
-    if (data) setRows(prev => [...prev, data as DocRow].sort((a, b) => a.nombre.localeCompare(b.nombre)))
+    if (error) return error.message
+    setRows(prev => [...prev, data as DocRow].sort((a, b) => a.nombre.localeCompare(b.nombre)))
     setModal(false)
+    return null
   }
 
   const handleDelete = async (row: DocRow) => {
@@ -193,19 +196,26 @@ export default function DocumentacionPage() {
 // ─── Modal: agregar alumna con su grupo ──────────────────────────────────────
 function AddModal({ grupos, onAdd, onClose }: {
   grupos: Grupo[]
-  onAdd: (nombre: string, grupoId: string | null) => void
+  onAdd: (nombre: string, grupoId: string | null) => Promise<string | null>
   onClose: () => void
 }) {
   const [nombre, setNombre] = useState('')
   const [grupoId, setGrupoId] = useState<string>('')
+  const [err, setErr] = useState('')
+  const [guardando, setGuardando] = useState(false)
 
-  const submit = () => {
+  const submit = async () => {
     if (!nombre.trim()) return
-    onAdd(nombre.trim(), grupoId || null)
+    setErr('')
+    setGuardando(true)
+    const error = await onAdd(nombre.trim(), grupoId || null)
+    setGuardando(false)
+    if (error) setErr(error)
   }
+  const backdrop = useBackdropClose(onClose)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" {...backdrop}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 animate-fade-in" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <h3 className="font-semibold text-slate-900">Agregar alumna</h3>
@@ -236,12 +246,15 @@ function AddModal({ grupos, onAdd, onClose }: {
               ))}
             </select>
           </div>
+          {err && (
+            <p className="text-red-600 text-xs bg-red-50 border border-red-200 rounded-lg px-3 py-2">{err}</p>
+          )}
           <div className="flex gap-3 pt-1">
             <button onClick={onClose} className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition">
               Cancelar
             </button>
-            <button onClick={submit} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition">
-              Agregar
+            <button onClick={submit} disabled={guardando} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition disabled:opacity-60">
+              {guardando ? 'Guardando…' : 'Agregar'}
             </button>
           </div>
         </div>

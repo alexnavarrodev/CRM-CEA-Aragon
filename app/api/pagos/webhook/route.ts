@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
-import { aplicarPagoAlumna, aplicarPagoExtra, enviarAvisoPago } from '@/lib/pagos-server'
+import { aplicarPagoAlumna, aplicarPagoExtra, aplicarInscripcion, enviarAvisoPago } from '@/lib/pagos-server'
 
 function admin() {
   return createClient(
@@ -77,8 +77,34 @@ export async function POST(req: NextRequest) {
     .from('pagos_online').select('id').eq('mp_payment_id', mpPaymentId).maybeSingle()
   if (yaExiste) return NextResponse.json({ ok: true, duplicado: true })
 
+  const externalRef = String(pago.external_reference || '')
+  const monto = Number(pago.transaction_amount) || 0
+  const canal = (pago.payment_type_id || '').includes('card') ? 'tarjeta' : 'transferencia'
+  const fecha = new Date(Date.now() - 6 * 3600 * 1000).toISOString().slice(0, 10)
+
+  // ── Inscripción de un prospecto nuevo (sin alumna todavía) ──
+  // external_reference = "insc|<prospectoId>"
+  if (externalRef.startsWith('insc|')) {
+    const prospectoId = externalRef.slice(5)
+    const { data: prospecto } = await supabase
+      .from('prospectos').select('id, user_id, nombre').eq('id', prospectoId).maybeSingle()
+    if (!prospecto) {
+      console.error('Webhook MP: prospecto no encontrado', prospectoId)
+      return NextResponse.json({ ok: true })
+    }
+    const { error: insErr } = await supabase.from('pagos_online').insert({
+      user_id: prospecto.user_id, alumna_id: null, mp_payment_id: mpPaymentId,
+      monto, estado: 'approved', canal, raw: pago,
+    })
+    if (insErr) return NextResponse.json({ ok: true, duplicado: true })
+
+    await aplicarInscripcion(supabase, prospecto, monto, canal, fecha)
+    await enviarAvisoPago({ nombre: prospecto.nombre, monto, categoria: 'inscripcion', canal })
+    return NextResponse.json({ ok: true })
+  }
+
   // external_reference = "<alumnaId>|<concepto>"  (concepto: mensualidad|uniforme|certificado)
-  const [alumnaId, conceptoRaw] = String(pago.external_reference || '').split('|')
+  const [alumnaId, conceptoRaw] = externalRef.split('|')
   const concepto = conceptoRaw || 'mensualidad'
   const { data: alumna } = await supabase
     .from('alumnas').select('id, user_id, nombre, programa, cuota_mensual')
@@ -87,10 +113,6 @@ export async function POST(req: NextRequest) {
     console.error('Webhook MP: alumna no encontrada', alumnaId)
     return NextResponse.json({ ok: true })
   }
-
-  const monto = Number(pago.transaction_amount) || 0
-  const canal = (pago.payment_type_id || '').includes('card') ? 'tarjeta' : 'transferencia'
-  const fecha = new Date(Date.now() - 6 * 3600 * 1000).toISOString().slice(0, 10)
 
   // Registrar primero el control (idempotencia) — si choca el UNIQUE, otro proceso ya lo hizo
   const { error: insErr } = await supabase.from('pagos_online').insert({

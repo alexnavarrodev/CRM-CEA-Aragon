@@ -26,6 +26,8 @@ export interface Grupo {
   horario: string | null
   color: string
   maestra: string | null
+  anio_inicio: number | null
+  mes_inicio: number | null
   created_at: string
 }
 

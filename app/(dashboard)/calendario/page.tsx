@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Grupo, Alumna, PagoColegiatura, DIA_COLORS } from '@/lib/types'
 import { kvGet, kvSet } from '@/lib/kv'
 import { ChevronLeft, ChevronRight, Plus, Trash2, X, RefreshCw, Copy } from 'lucide-react'
+import { useBackdropClose } from '@/lib/useBackdropClose'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface PaymentCalendar {
@@ -491,10 +492,11 @@ function AddCalendarModal({ template, onSave, onClose }: {
   }
 
   const allFilled = nombre.trim() && inicio && pagos.length > 0 && pagos.every(p => p)
+  const backdrop = useBackdropClose(onClose)
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm"
-      onClick={onClose}>
+      {...backdrop}>
       <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg mx-0 sm:mx-4 max-h-[95vh] flex flex-col"
         onClick={e => e.stopPropagation()}>
         {/* Header */}

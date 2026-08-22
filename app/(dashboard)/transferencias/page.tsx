@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { hoyMX } from '@/lib/fecha'
 import { kvGet, kvSet } from '@/lib/kv'
 import { Plus, Minus, Trash2, X, ArrowUpRight, ArrowDownRight } from 'lucide-react'
+import { useBackdropClose } from '@/lib/useBackdropClose'
 
 interface WalletEntry {
   id: string
@@ -232,9 +233,10 @@ function EntryModal({ mode, onSave, onClose }: {
 
   const PRESETS_ADD = ['Transferencia recibida', 'Colegiatura', 'Bachillerato', 'Inscripción', 'Otros']
   const PRESETS_SUB = ['Sueldos semanal', 'Sueldo Alex', 'Sueldo ayudante', 'Renta', 'Servicios', 'Materiales']
+  const backdrop = useBackdropClose(onClose)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm" {...backdrop}>
       <div className="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm mx-0 sm:mx-4" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">

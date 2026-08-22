@@ -77,11 +77,18 @@ netlify deploy --build --prod
   (RCP $1,200 / Uniforme $1,500 / Certificado $7,000): botón "Falta $X" o "✓ Liquidado" por
   columna, clic para ajustar el monto inline; la fila se pone verde cuando las 3 están
   liquidadas. Enlace en el menú (Sidebar, "RCP/Unif./Cert.").
-- `documentacion/` (27 jun 2026) — checklist de papeles de Bachillerato por alumna: alta manual
-  con su grupo, columnas CURP/INE/FIRMA/ESTUDIOS/A.NACIMIENTO/2 FOTOS con casillas clicables;
-  la fila se pone verde cuando están los 6 documentos. Tabla `documentacion_bachillerato` (RLS
-  por user_id, SQL en `supabase-documentacion-bachillerato.sql`). Enlace en el menú (Sidebar).
-  **Pendiente portar a Atenea** (aún no se ha copiado).
+- `documentacion/` (27 jun 2026, arreglada de raíz 11 ago 2026) — checklist de papeles de
+  Bachillerato por alumna: alta manual con su grupo, columnas CURP/INE/FIRMA/ESTUDIOS/
+  A.NACIMIENTO/2 FOTOS con casillas clicables; la fila se pone verde cuando están los 6
+  documentos. Tabla `documentacion_bachillerato` (RLS por user_id, SQL en
+  `supabase-documentacion-bachillerato.sql`). Enlace en el menú (Sidebar).
+  **⚠️ Bug corregido (11 ago 2026):** "Agregar alumna" se quedaba en blanco sin agregar nada —
+  la tabla `documentacion_bachillerato` NUNCA se había creado en producción (a pesar de que
+  este archivo decía lo contrario) y el código no mostraba ningún error al fallar el insert
+  (`if (data) ...` silencioso, cerraba el modal igual). Corregido: se corrió el SQL de verdad
+  en Aragón vía Management API, y `handleAdd`/`AddModal` ahora propagan y muestran el error si
+  algo falla, con estado "Guardando…" mientras espera.
+  **Pendiente portar a Atenea** (aún no se ha copiado, y ahí tampoco se ha corrido el SQL).
 - `prospectos/`, `grupos/`, `egresadas/`, `reportes/`, `ajustes/`.
 - **`app/pagar/[token]/`** (PÚBLICA, sin login) — estado de cuenta de la alumna por su token;
   3 secciones: **Mensualidad**, **Uniforme**, **Certificado**; cada una con su botón de pago.
@@ -165,4 +172,7 @@ y el remitente del correo). Atenea aún NO tiene Mercado Pago configurado (cuent
 `supabase-pago-token.sql`, `supabase-pagos-online.sql`, `supabase-pagos-extras.sql`
 (en Aragón y Atenea). El esquema base está en `supabase-schema.sql`.
 `supabase-app-kv.sql` (tabla app_kv) — corrido en Aragón; FALTA correrlo en Atenea al portar.
-`supabase-documentacion-bachillerato.sql` — corrido en Aragón (27 jun); FALTA en Atenea.
+`supabase-documentacion-bachillerato.sql` — **corrido de verdad en Aragón el 11 ago 2026**
+(la nota anterior de "corrido 27 jun" era incorrecta: la tabla nunca se había creado en
+producción, por eso "Agregar alumna" fallaba en silencio — ver §Páginas/documentación y la
+lección de abajo). FALTA en Atenea.
