@@ -60,19 +60,21 @@ netlify deploy --build --prod
 
 ## Páginas (`app/(dashboard)/` salvo `/pagar`)
 - `hoy/` — **"Mi día"** (28 ago 2026), primera del menú. Guion de lo que hay que resolver
-  ese día, para abrirlo al llegar a las 9:00. Dos bloques:
-  1. **Pagos que debo hacer**: la docente de cada grupo que da clase ese día + los fijos de
-     sábado (Alex $3,000 / Isela $1,500, confirmados por Alex). Los sueldos de las docentes
-     **NO son fijos** (varían por día y grupo: Ximena $1,800 vie vs $2,400 sáb), así que solo
-     se muestra como referencia su **último pago del MISMO día de la semana** — nunca una
-     cifra inventada. Se marcan como pagados **solos** cuando el egreso se registra en Caja
-     con categoría `sueldos` (match por nombre de pila, tolera "Isela"/"Isella"); no hay
-     doble captura ni checkbox manual.
-  2. **Grupos del día** (`grupos.dia` = día de hoy) con las alumnas que deben colegiatura /
+  ese día, para abrirlo al llegar a las 9:00. Tres bloques:
+  1. **Recordatorios** (tabla `recordatorios`): notas con fecha que Alex apunta a mano
+     ("hablar de sus faltas"), opcionalmente ligadas a una alumna. Salen el día elegido; si
+     no se marcan como hechas siguen apareciendo como **atrasadas** (no se pierden). Se
+     crean desde el botón «Recordatorio» o desde el icono 🔔 de cada alumna deudora.
+  2. **Sueldos a pagar hoy**: salen **solo en las fechas de pago del calendario del grupo**
+     (`grupos.calendario_id` → `payment_calendars_v2`), no cada día de clase. El monto es
+     **exacto**, ver `lib/nomina.ts`. Además los fijos de sábado (Alex $3,000 / Isela $1,500).
+     Se marcan como pagados **solos** al registrar el egreso en Caja con categoría `sueldos`
+     (match por nombre de pila, tolera "Isela"/"Isella"); sin doble captura.
+  3. **Grupos con clase ese día** (`grupos.dia`) con las alumnas que deben colegiatura /
      bachillerato, meses y montos faltantes, días de atraso, botón WhatsApp + enlace de pago
      (reusa la lógica de `por-cobrar`). Las que están al corriente solo se cuentan.
   Incluye navegación ◀▶ por día (para preparar el día siguiente) y **"Copiar guion"** que
-  vuelca todo como texto plano. No usa tablas nuevas.
+  vuelca todo como texto plano.
 - `dashboard/` (Panel, client) — KPIs por mes con filtro ◀▶; **Margen** (bachillerato sólo
   por su ganancia >$5000 acumulado por alumna; ambos cuenta col completo + bachi-ganancia);
   **Cobranza pendiente** clickable → modal con alumnas que deben.
@@ -140,6 +142,17 @@ netlify deploy --build --prod
 - **Descuento pronto pago $50**: programa colegiaturas Y ambos (solo lado colegiatura), si
   paga antes del día 20 y el mes actual está sin pagar. El mes queda 'pagado' mostrando $1000
   (la Caja registra el dinero real). En 'ambos': bachillerato completo, colegiatura −$50.
+- **Sueldo de las docentes** (`lib/nomina.ts`): **$75 × alumnas activas del grupo × semanas
+  hasta el siguiente pago**. Las semanas salen del calendario del grupo (distancia entre la
+  fecha de pago y la siguiente: 4 o 5 según el mes), y se paga **el día de la fecha de pago**,
+  no cada día de clase. Es **por grupo**, no por docente: Lizbeth cobra por separado MMLC y
+  VMLC. Comprobado contra Caja: VMX 6×4=$1,800 · SMX 8×4=$2,400 · VMLC 11×5=$4,125 ·
+  SVLE 8×5=$3,000 · SMA 7×4=$2,100 (8/8 casos exactos).
+  ⚠️ El enlace grupo→calendario **NO se puede deducir por el nombre** (el grupo `SVLE` usa el
+  calendario `SMLE`, `VMLC` usa `VML`, `SMA` usa `SMAC`): vive explícito en
+  `grupos.calendario_id` y se edita en el modal de Grupos.
+- **Sueldos fijos de sábado**: Alex $3,000 e Isela $1,500 (constante `SUELDOS_SABADO` en
+  `app/(dashboard)/hoy/page.tsx`; cambiarlos requiere deploy).
 - **Uniforme $1500** (vence mes 2), **Certificado $7000** (vence mes 8) y **RCP $1200** (sin
   plazo/vencido). Se pagan a plazos (aportaciones que acumulan). Inicio de curso = mes más
   antiguo con registro de la alumna.
@@ -161,6 +174,9 @@ netlify deploy --build --prod
   datos que crecen en user_metadata. SQL: `supabase-app-kv.sql`.
 - `documentacion_bachillerato` (27 jun 2026, RLS por user_id): checklist de papeles por alumna
   para la página `documentacion/`. SQL: `supabase-documentacion-bachillerato.sql`.
+- `recordatorios` (28 ago 2026, RLS por user_id): notas con fecha para la página `hoy/`
+  (`alumna_id` opcional, `hecho` bool). SQL: `supabase-recordatorios.sql` (ese archivo añade
+  también `grupos.calendario_id`). Corrido en Aragón; FALTA en Atenea.
 - localStorage: `crm_categorias` (categorías de caja, por navegador).
 
 ## Mercado Pago

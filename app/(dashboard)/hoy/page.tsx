@@ -2,29 +2,29 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Grupo, MESES_FULL, DIA_COLORS } from '@/lib/types'
+import { Grupo, MESES_FULL, DIA_COLORS, Recordatorio } from '@/lib/types'
+import { kvGet } from '@/lib/kv'
 import { mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, TIPOS_BACHI } from '@/lib/acumulacion'
+import { PaymentCalendar, sueldoDocente, SueldoCalculado } from '@/lib/nomina'
+import { useBackdropClose } from '@/lib/useBackdropClose'
 import {
-  MessageCircle, Link2, Check, Phone, Banknote, ClipboardCopy,
-  ChevronLeft, ChevronRight, CalendarDays, Coffee, Wallet,
+  MessageCircle, Link2, Check, Phone, Banknote, ClipboardCopy, Plus, X,
+  ChevronLeft, ChevronRight, CalendarDays, Coffee, Wallet, Bell, AlertTriangle, Trash2,
 } from 'lucide-react'
 
 const fmt = (n: number) => `$${Math.round(n).toLocaleString('es-MX')}`
-
-// JS getUTCDay() → código de día usado en `grupos.dia`
 const DIA_POR_INDICE = ['DOM', 'LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB']
+const CAL_KEY = 'payment_calendars_v2'
 
-// Sueldos fijos que se pagan cada SÁBADO (montos confirmados por Alex, ago 2026).
-// Los de las maestras NO son fijos (varían por grupo/semana), por eso solo se
-// muestra el último pago como referencia en vez de inventar una cifra.
+// Sueldos fijos de cada SÁBADO (montos confirmados por Alex).
 const SUELDOS_SABADO = [
-  { nombre: 'Alex',  rol: 'Mi sueldo',           monto: 3000 },
-  { nombre: 'Isela', rol: 'Ayudante',            monto: 1500 },
+  { nombre: 'Alex',  rol: 'Mi sueldo', monto: 3000 },
+  { nombre: 'Isela', rol: 'Ayudante',  monto: 1500 },
 ]
 
-const norm = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
 
-/** ¿El concepto de un movimiento de caja se refiere a esta persona?
+/** ¿El concepto de un egreso de Caja se refiere a esta persona?
  *  Compara por nombre de pila y tolera variantes ("Isela" / "Isella"). */
 function conceptoEsDe(concepto: string, nombre: string): boolean {
   const c = norm(concepto)
@@ -33,7 +33,6 @@ function conceptoEsDe(concepto: string, nombre: string): boolean {
   return c.includes(pila) || (pila.length > 4 && c.includes(pila.slice(0, -1)))
 }
 
-// Teléfono → formato wa.me MX (52 + 10 dígitos). Mismo criterio que Por cobrar.
 function waPhone(tel: string | null): string | null {
   if (!tel) return null
   let d = tel.replace(/\D/g, '')
@@ -48,34 +47,35 @@ interface AlumnaDia {
   id: string; nombre: string; telefono: string | null; pago_token: string | null
   meses: MesPend[]; total: number; atrasoDias: number
 }
-interface GrupoDia {
-  grupo: Grupo
-  conAdeudo: AlumnaDia[]
-  alCorriente: number
-  totalPorCobrar: number
+interface GrupoDia { grupo: Grupo; conAdeudo: AlumnaDia[]; alCorriente: number; totalPorCobrar: number }
+interface PagoNomina {
+  grupo: Grupo; docente: string; sueldo: SueldoCalculado
+  pagadoHoy: boolean; montoPagadoHoy: number
 }
-interface PagoPersonal {
-  nombre: string; rol: string
-  montoFijo: number | null
-  ultimoMonto: number | null; ultimaFecha: string | null
+interface PagoFijo {
+  nombre: string; rol: string; monto: number
   pagadoHoy: boolean; montoPagadoHoy: number
 }
 
 export default function HoyPage() {
   const [offset, setOffset] = useState(0)
   const [gruposDia, setGruposDia] = useState<GrupoDia[]>([])
-  const [pagosPersonal, setPagosPersonal] = useState<PagoPersonal[]>([])
+  const [nomina, setNomina] = useState<PagoNomina[]>([])
+  const [fijos, setFijos] = useState<PagoFijo[]>([])
+  const [recordatorios, setRecordatorios] = useState<Recordatorio[]>([])
+  const [alumnasTodas, setAlumnasTodas] = useState<{ id: string; nombre: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [copiadoGuion, setCopiadoGuion] = useState(false)
+  const [modalRec, setModalRec] = useState<{ alumnaId: string | null } | null>(null)
   const supabase = createClient()
 
-  // Fecha objetivo desplazada a "hora de México" (UTC−6) para leerla con getUTC*
   const fecha = useMemo(
     () => new Date(Date.now() - 6 * 3600 * 1000 + offset * 86400000),
     [offset],
   )
   const fechaStr = fecha.toISOString().slice(0, 10)
+  const hoyStr = new Date(Date.now() - 6 * 3600 * 1000).toISOString().slice(0, 10)
   const diaCode = DIA_POR_INDICE[fecha.getUTCDay()]
   const fechaLabel = new Intl.DateTimeFormat('es-MX', {
     weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC',
@@ -86,28 +86,61 @@ export default function HoyPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    const [{ data: gr }, { data: al }, { data: col }, { data: ba }, { data: movs }] = await Promise.all([
-      supabase.from('grupos').select('*').eq('user_id', user.id).order('dia'),
-      supabase.from('alumnas').select('id,nombre,telefono,programa,cuota_mensual,pago_token,grupo_id')
-        .eq('user_id', user.id).eq('status', 'activa').order('nombre'),
-      supabase.from('pagos_colegiaturas').select('alumna_id,id,anio,mes,monto,estado').eq('user_id', user.id),
-      supabase.from('pagos_bachillerato').select('alumna_id,id,anio,tipo,monto,estado').eq('user_id', user.id),
-      supabase.from('movimientos_caja').select('fecha,concepto,monto,categoria,tipo')
-        .eq('user_id', user.id).eq('tipo', 'egreso').eq('categoria', 'sueldos')
-        .order('fecha', { ascending: false }).limit(200),
-    ])
+    const [{ data: gr }, { data: al }, { data: col }, { data: ba }, { data: movs }, { data: recs }, cals] =
+      await Promise.all([
+        supabase.from('grupos').select('*').eq('user_id', user.id).order('dia'),
+        supabase.from('alumnas').select('id,nombre,telefono,programa,cuota_mensual,pago_token,grupo_id')
+          .eq('user_id', user.id).eq('status', 'activa').order('nombre'),
+        supabase.from('pagos_colegiaturas').select('id,alumna_id,anio,mes,monto,estado').eq('user_id', user.id),
+        supabase.from('pagos_bachillerato').select('id,alumna_id,anio,tipo,monto,estado').eq('user_id', user.id),
+        supabase.from('movimientos_caja').select('fecha,concepto,monto')
+          .eq('user_id', user.id).eq('tipo', 'egreso').eq('categoria', 'sueldos')
+          .order('fecha', { ascending: false }).limit(200),
+        supabase.from('recordatorios').select('*, alumna:alumnas(nombre)')
+          .eq('user_id', user.id).order('fecha'),
+        kvGet<PaymentCalendar[]>(supabase, CAL_KEY),
+      ])
+
+    setAlumnasTodas((al ?? []).map(a => ({ id: a.id, nombre: a.nombre })))
+    setRecordatorios((recs ?? []) as Recordatorio[])
 
     const anioRef = fecha.getUTCFullYear(), mesRef = fecha.getUTCMonth() + 1
-    const hoyDate = new Date(Date.UTC(anioRef, mesRef - 1, fecha.getUTCDate()))
+    const hoyMs = Date.UTC(anioRef, mesRef - 1, fecha.getUTCDate())
+    const calendarios = Array.isArray(cals) ? cals : []
+    const sueldosPagados = movs ?? []
+    const cuentaAlumnas = (gid: string) => (al ?? []).filter(a => a.grupo_id === gid).length
 
-    // ── Grupos que tienen clase este día ──────────────────────────────────
-    const delDia = (gr ?? []).filter(g => g.dia === diaCode)
-    const bloques: GrupoDia[] = delDia.map(g => {
-      const suyas = (al ?? []).filter(a => a.grupo_id === g.id)
+    // ── Sueldos de docentes: solo en las fechas de pago del calendario del grupo ──
+    const listaNomina: PagoNomina[] = []
+    for (const g of (gr ?? [])) {
+      if (!g.calendario_id || !g.maestra) continue
+      const cal = calendarios.find(c => c.id === g.calendario_id)
+      if (!cal) continue
+      const s = sueldoDocente(cal, fechaStr, cuentaAlumnas(g.id))
+      if (!s) continue
+      const suyos = sueldosPagados.filter(m => conceptoEsDe(m.concepto ?? '', g.maestra!) && m.fecha === fechaStr)
+      listaNomina.push({
+        grupo: g, docente: g.maestra, sueldo: s,
+        pagadoHoy: suyos.length > 0,
+        montoPagadoHoy: suyos.reduce((acc, m) => acc + Number(m.monto), 0),
+      })
+    }
+
+    // ── Sueldos fijos de sábado ───────────────────────────────────────────
+    const listaFijos: PagoFijo[] = diaCode !== 'SAB' ? [] : SUELDOS_SABADO.map(s => {
+      const suyos = sueldosPagados.filter(m => conceptoEsDe(m.concepto ?? '', s.nombre) && m.fecha === fechaStr)
+      return {
+        ...s,
+        pagadoHoy: suyos.length > 0,
+        montoPagadoHoy: suyos.reduce((acc, m) => acc + Number(m.monto), 0),
+      }
+    })
+
+    // ── Grupos con clase este día y su cobranza ───────────────────────────
+    const bloques: GrupoDia[] = (gr ?? []).filter(g => g.dia === diaCode).map(g => {
       const conAdeudo: AlumnaDia[] = []
       let alCorriente = 0
-
-      for (const a of suyas) {
+      for (const a of (al ?? []).filter(x => x.grupo_id === g.id)) {
         const lim = a.programa === 'ambos' ? 1000 : (Number(a.cuota_mensual) || 1000)
         const meses: MesPend[] = []
         if (a.programa === 'colegiaturas' || a.programa === 'ambos') {
@@ -122,14 +155,11 @@ export default function HoyPage() {
             })
         }
         if (meses.length === 0) { alCorriente++; continue }
-
-        // Días de atraso desde el mes pendiente más antiguo
         const propios = (col ?? []).filter(p => p.alumna_id === a.id)
         let atrasoDias = 0
         if (propios.length > 0) {
           const ini = propios.reduce((min, p) => (p.anio * 12 + p.mes) < (min.anio * 12 + min.mes) ? p : min)
-          const desde = Date.UTC(ini.anio, ini.mes - 1, 1)
-          atrasoDias = Math.max(0, Math.floor((hoyDate.getTime() - desde) / 86400000))
+          atrasoDias = Math.max(0, Math.floor((hoyMs - Date.UTC(ini.anio, ini.mes - 1, 1)) / 86400000))
         }
         conAdeudo.push({
           id: a.id, nombre: a.nombre, telefono: a.telefono, pago_token: a.pago_token,
@@ -137,50 +167,47 @@ export default function HoyPage() {
         })
       }
       conAdeudo.sort((x, y) => (y.atrasoDias - x.atrasoDias) || (y.total - x.total))
-      return {
-        grupo: g, conAdeudo, alCorriente,
-        totalPorCobrar: conAdeudo.reduce((s, d) => s + d.total, 0),
-      }
+      return { grupo: g, conAdeudo, alCorriente, totalPorCobrar: conAdeudo.reduce((s, d) => s + d.total, 0) }
     })
 
-    // ── Sueldos por pagar este día ────────────────────────────────────────
-    const sueldos = movs ?? []
-    const construir = (nombre: string, rol: string, montoFijo: number | null): PagoPersonal => {
-      const suyos = sueldos.filter(m => conceptoEsDe(m.concepto ?? '', nombre))
-      const deHoy = suyos.filter(m => m.fecha === fechaStr)
-      const anteriores = suyos.filter(m => m.fecha !== fechaStr)
-      // Varias docentes dan clase en días distintos con tarifas distintas (p. ej. Ximena
-      // cobra diferente el viernes que el sábado). Como referencia se prefiere su último
-      // pago del MISMO día de la semana; solo si no hay, se cae al más reciente.
-      const mismoDia = anteriores.find(m => DIA_POR_INDICE[new Date(`${m.fecha}T00:00:00Z`).getUTCDay()] === diaCode)
-      const previo = mismoDia ?? anteriores[0] ?? null
-      return {
-        nombre, rol, montoFijo,
-        ultimoMonto: previo ? Number(previo.monto) : null,
-        ultimaFecha: previo?.fecha ?? null,
-        pagadoHoy: deHoy.length > 0,
-        montoPagadoHoy: deHoy.reduce((s, m) => s + Number(m.monto), 0),
-      }
-    }
-
-    const lista: PagoPersonal[] = []
-    // Docente de cada grupo que da clase hoy (monto variable → solo referencia)
-    for (const g of delDia) {
-      if (!g.maestra) continue
-      if (lista.some(p => norm(p.nombre) === norm(g.maestra!))) continue
-      lista.push(construir(g.maestra, `Docente · ${g.nombre}`, null))
-    }
-    // Sueldos fijos de sábado
-    if (diaCode === 'SAB') {
-      for (const s of SUELDOS_SABADO) lista.push(construir(s.nombre, s.rol, s.monto))
-    }
-
+    setNomina(listaNomina)
+    setFijos(listaFijos)
     setGruposDia(bloques)
-    setPagosPersonal(lista)
     setLoading(false)
   }, [diaCode, fechaStr])
 
   useEffect(() => { load() }, [load])
+
+  // Recordatorios: los del día + los atrasados sin hacer (solo al ver hoy)
+  const recsDelDia = recordatorios.filter(r => r.fecha === fechaStr)
+  const recsAtrasados = offset === 0
+    ? recordatorios.filter(r => !r.hecho && r.fecha < hoyStr)
+    : []
+
+  const toggleRec = async (r: Recordatorio) => {
+    const nuevo = !r.hecho
+    setRecordatorios(prev => prev.map(x => x.id === r.id ? { ...x, hecho: nuevo } : x))
+    const { error } = await supabase.from('recordatorios').update({ hecho: nuevo }).eq('id', r.id)
+    if (error) setRecordatorios(prev => prev.map(x => x.id === r.id ? { ...x, hecho: !nuevo } : x))
+  }
+
+  const borrarRec = async (r: Recordatorio) => {
+    const previo = recordatorios
+    setRecordatorios(prev => prev.filter(x => x.id !== r.id))
+    const { error } = await supabase.from('recordatorios').delete().eq('id', r.id)
+    if (error) setRecordatorios(previo)
+  }
+
+  const crearRec = async (titulo: string, fechaRec: string, alumnaId: string | null): Promise<string | null> => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return 'Sesión expirada, vuelve a entrar.'
+    const { data, error } = await supabase.from('recordatorios')
+      .insert({ user_id: user.id, titulo, fecha: fechaRec, alumna_id: alumnaId })
+      .select('*, alumna:alumnas(nombre)').single()
+    if (error) return error.message
+    setRecordatorios(prev => [...prev, data as Recordatorio])
+    return null
+  }
 
   const enlace = (token: string | null) => `${window.location.origin}/pagar/${token}`
 
@@ -199,32 +226,69 @@ export default function HoyPage() {
   }
 
   const totalDia = gruposDia.reduce((s, b) => s + b.totalPorCobrar, 0)
-  const alumnasDia = gruposDia.reduce((s, b) => s + b.conAdeudo.length, 0)
-  const pagosPendientes = pagosPersonal.filter(p => !p.pagadoHoy).length
+  const totalNomina = nomina.filter(p => !p.pagadoHoy).reduce((s, p) => s + p.sueldo.monto, 0)
+    + fijos.filter(p => !p.pagadoHoy).reduce((s, p) => s + p.monto, 0)
+  const pendientesRec = [...recsAtrasados, ...recsDelDia.filter(r => !r.hecho)].length
 
   const copiarGuion = () => {
     const L: string[] = [`GUION — ${fechaLabel}`, '']
-    if (pagosPersonal.length) {
-      L.push('PAGOS QUE DEBO HACER:')
-      pagosPersonal.forEach(p => {
-        const monto = p.montoFijo != null ? fmt(p.montoFijo)
-          : p.ultimoMonto != null ? `último ${fmt(p.ultimoMonto)}` : 'monto por definir'
-        L.push(`  ${p.pagadoHoy ? '[x]' : '[ ]'} ${p.nombre} (${p.rol}) — ${p.pagadoHoy ? `pagado ${fmt(p.montoPagadoHoy)}` : monto}`)
-      })
+    if (recsAtrasados.length || recsDelDia.length) {
+      L.push('RECORDATORIOS:')
+      recsAtrasados.forEach(r => L.push(`  [ ] (ATRASADO ${r.fecha}) ${r.alumna?.nombre ? r.alumna.nombre + ' — ' : ''}${r.titulo}`))
+      recsDelDia.forEach(r => L.push(`  ${r.hecho ? '[x]' : '[ ]'} ${r.alumna?.nombre ? r.alumna.nombre + ' — ' : ''}${r.titulo}`))
+      L.push('')
+    }
+    if (nomina.length || fijos.length) {
+      L.push('SUELDOS A PAGAR HOY:')
+      nomina.forEach(p => L.push(
+        `  ${p.pagadoHoy ? '[x]' : '[ ]'} ${p.docente} (${p.grupo.nombre}) — ${fmt(p.sueldo.monto)}` +
+        ` = ${p.sueldo.alumnas} alumnas x ${p.sueldo.semanas} sem x $75`))
+      fijos.forEach(p => L.push(`  ${p.pagadoHoy ? '[x]' : '[ ]'} ${p.nombre} (${p.rol}) — ${fmt(p.monto)}`))
       L.push('')
     }
     gruposDia.forEach(b => {
       L.push(`GRUPO ${b.grupo.nombre}${b.grupo.horario ? ` (${b.grupo.horario})` : ''} — ${fmt(b.totalPorCobrar)} por cobrar`)
       if (!b.conAdeudo.length) L.push('  Todas al corriente.')
-      b.conAdeudo.forEach(d => {
-        L.push(`  [ ] ${d.nombre} — ${fmt(d.total)}: ${d.meses.map(m => m.label).join(', ')}${d.atrasoDias ? ` (${d.atrasoDias} días de atraso)` : ''}`)
-      })
+      b.conAdeudo.forEach(d => L.push(
+        `  [ ] ${d.nombre} — ${fmt(d.total)}: ${d.meses.map(m => m.label).join(', ')}${d.atrasoDias ? ` (${d.atrasoDias} días de atraso)` : ''}`))
       L.push('')
     })
     navigator.clipboard.writeText(L.join('\n')).then(() => {
       setCopiadoGuion(true); setTimeout(() => setCopiadoGuion(false), 1800)
     })
   }
+
+  const filaRec = (r: Recordatorio, atrasado = false) => (
+    <div key={r.id}
+      className={`flex items-start gap-3 rounded-2xl border p-3.5 ${
+        atrasado ? 'bg-red-50/60 border-red-200'
+        : r.hecho ? 'bg-slate-50 border-slate-200' : 'bg-white border-slate-200 shadow-sm'
+      }`}>
+      <button onClick={() => toggleRec(r)}
+        className={`mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition ${
+          r.hecho ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 hover:border-emerald-400'
+        }`} title={r.hecho ? 'Marcar como pendiente' : 'Marcar como hecho'}>
+        {r.hecho && <Check className="w-3 h-3 text-white" />}
+      </button>
+      <div className="min-w-0 flex-1">
+        <p className={`text-sm ${r.hecho ? 'line-through text-slate-400' : 'text-slate-800 font-medium'}`}>
+          {r.titulo}
+        </p>
+        <div className="flex items-center gap-2 flex-wrap mt-0.5">
+          {r.alumna?.nombre && <span className="text-xs text-blue-600 font-medium">{r.alumna.nombre}</span>}
+          {atrasado && (
+            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700 flex items-center gap-1">
+              <AlertTriangle className="w-2.5 h-2.5" /> era del {r.fecha}
+            </span>
+          )}
+        </div>
+      </div>
+      <button onClick={() => borrarRec(r)}
+        className="p-1.5 rounded-lg text-slate-300 hover:text-red-400 hover:bg-red-50 transition flex-shrink-0" title="Eliminar">
+        <Trash2 className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  )
 
   return (
     <div className="flex flex-col h-full animate-fade-in">
@@ -235,7 +299,11 @@ export default function HoyPage() {
             <h1 className="text-xl md:text-2xl font-bold text-slate-900">Mi día</h1>
             <p className="text-sm text-slate-500 mt-0.5 capitalize">{fechaLabel}</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={() => setModalRec({ alumnaId: null })}
+              className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition shadow-sm">
+              <Plus className="w-4 h-4" /> Recordatorio
+            </button>
             <button onClick={() => setOffset(o => o - 1)}
               className="p-2 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 transition" title="Día anterior">
               <ChevronLeft className="w-4 h-4" />
@@ -261,19 +329,22 @@ export default function HoyPage() {
         </div>
 
         {!loading && (
-          <div className="grid grid-cols-3 gap-2 md:gap-3 mt-3">
-            <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-200">
-              <p className="text-[10px] md:text-xs text-slate-500 font-medium">Grupos hoy</p>
-              <p className="text-base md:text-xl font-bold text-slate-700">{gruposDia.length}</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mt-3">
+            <div className="bg-violet-50 rounded-xl p-2.5 border border-violet-100">
+              <p className="text-[10px] md:text-xs text-violet-600 font-medium">Recordatorios</p>
+              <p className="text-base md:text-xl font-bold text-violet-700">{pendientesRec}</p>
             </div>
             <div className="bg-amber-50 rounded-xl p-2.5 border border-amber-100">
               <p className="text-[10px] md:text-xs text-amber-600 font-medium">Por cobrar</p>
               <p className="text-base md:text-xl font-bold text-amber-700 truncate">{fmt(totalDia)}</p>
-              <p className="text-[10px] text-amber-600/70">{alumnasDia} alumnas</p>
             </div>
             <div className="bg-blue-50 rounded-xl p-2.5 border border-blue-100">
-              <p className="text-[10px] md:text-xs text-blue-600 font-medium">Sueldos por pagar</p>
-              <p className="text-base md:text-xl font-bold text-blue-700">{pagosPendientes}</p>
+              <p className="text-[10px] md:text-xs text-blue-600 font-medium">Sueldos hoy</p>
+              <p className="text-base md:text-xl font-bold text-blue-700 truncate">{fmt(totalNomina)}</p>
+            </div>
+            <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-200">
+              <p className="text-[10px] md:text-xs text-slate-500 font-medium">Grupos hoy</p>
+              <p className="text-base md:text-xl font-bold text-slate-700">{gruposDia.length}</p>
             </div>
           </div>
         )}
@@ -284,41 +355,66 @@ export default function HoyPage() {
           <div className="text-center py-16 text-slate-400">Cargando…</div>
         ) : (
           <>
-            {/* ── Sueldos por pagar ───────────────────────────────────── */}
-            {pagosPersonal.length > 0 && (
+            {/* ── Recordatorios ───────────────────────────────────────── */}
+            {(recsAtrasados.length > 0 || recsDelDia.length > 0) && (
               <section>
                 <h2 className="flex items-center gap-2 text-sm font-bold text-slate-700 uppercase tracking-wide mb-2">
-                  <Banknote className="w-4 h-4 text-blue-500" /> Pagos que debo hacer
+                  <Bell className="w-4 h-4 text-violet-500" /> Recordatorios
+                </h2>
+                <div className="space-y-2">
+                  {recsAtrasados.map(r => filaRec(r, true))}
+                  {recsDelDia.map(r => filaRec(r))}
+                </div>
+              </section>
+            )}
+
+            {/* ── Sueldos a pagar hoy ─────────────────────────────────── */}
+            {(nomina.length > 0 || fijos.length > 0) && (
+              <section>
+                <h2 className="flex items-center gap-2 text-sm font-bold text-slate-700 uppercase tracking-wide mb-2">
+                  <Banknote className="w-4 h-4 text-blue-500" /> Sueldos a pagar hoy
                 </h2>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  {pagosPersonal.map(p => (
+                  {nomina.map(p => (
+                    <div key={p.grupo.id}
+                      className={`rounded-2xl border p-3.5 flex items-start justify-between gap-3 ${
+                        p.pagadoHoy ? 'bg-emerald-50/60 border-emerald-200' : 'bg-white border-slate-200 shadow-sm'
+                      }`}>
+                      <div className="min-w-0">
+                        <p className={`font-semibold ${p.pagadoHoy ? 'text-emerald-800' : 'text-slate-800'}`}>{p.docente}</p>
+                        <p className="text-xs text-slate-500">Docente · {p.grupo.nombre}</p>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          {p.sueldo.alumnas} alumnas × {p.sueldo.semanas} {p.sueldo.semanas === 1 ? 'semana' : 'semanas'} × $75
+                        </p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className={`text-lg font-bold ${p.pagadoHoy ? 'text-emerald-700' : 'text-slate-800'}`}>
+                          {fmt(p.sueldo.monto)}
+                        </p>
+                        {p.pagadoHoy && (
+                          <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-semibold">
+                            <Check className="w-3 h-3" /> Pagado {fmt(p.montoPagadoHoy)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {fijos.map(p => (
                     <div key={p.nombre}
-                      className={`rounded-2xl border p-3.5 flex items-center justify-between gap-3 ${
+                      className={`rounded-2xl border p-3.5 flex items-start justify-between gap-3 ${
                         p.pagadoHoy ? 'bg-emerald-50/60 border-emerald-200' : 'bg-white border-slate-200 shadow-sm'
                       }`}>
                       <div className="min-w-0">
                         <p className={`font-semibold ${p.pagadoHoy ? 'text-emerald-800' : 'text-slate-800'}`}>{p.nombre}</p>
                         <p className="text-xs text-slate-500">{p.rol}</p>
-                        {!p.pagadoHoy && p.montoFijo == null && (
-                          <p className="text-[11px] text-slate-400 mt-1">
-                            {p.ultimoMonto != null
-                              ? `Último pago: ${fmt(p.ultimoMonto)} · ${p.ultimaFecha}`
-                              : 'Sin pagos previos registrados'}
-                          </p>
-                        )}
+                        <p className="text-[11px] text-slate-400 mt-1">Fijo semanal (sábados)</p>
                       </div>
                       <div className="text-right flex-shrink-0">
-                        {p.pagadoHoy ? (
-                          <>
-                            <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold text-sm">
-                              <Check className="w-4 h-4" /> Pagado
-                            </span>
-                            <p className="text-xs text-emerald-600">{fmt(p.montoPagadoHoy)}</p>
-                          </>
-                        ) : p.montoFijo != null ? (
-                          <p className="text-lg font-bold text-slate-800">{fmt(p.montoFijo)}</p>
-                        ) : (
-                          <span className="text-xs text-slate-400">Monto variable</span>
+                        <p className={`text-lg font-bold ${p.pagadoHoy ? 'text-emerald-700' : 'text-slate-800'}`}>{fmt(p.monto)}</p>
+                        {p.pagadoHoy && (
+                          <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-semibold">
+                            <Check className="w-3 h-3" /> Pagado {fmt(p.montoPagadoHoy)}
+                          </span>
                         )}
                       </div>
                     </div>
@@ -326,14 +422,14 @@ export default function HoyPage() {
                 </div>
                 <p className="text-[11px] text-slate-400 mt-2 flex items-center gap-1.5">
                   <Wallet className="w-3 h-3" />
-                  Se marcan como pagados solos cuando registras el egreso en Caja con categoría «sueldos».
+                  Se marcan solos al registrar el egreso en Caja con categoría «sueldos».
                 </p>
               </section>
             )}
 
-            {/* ── Grupos del día ──────────────────────────────────────── */}
+            {/* ── Grupos con clase hoy ────────────────────────────────── */}
             {gruposDia.length === 0 ? (
-              <div className="text-center py-16 border-2 border-dashed border-slate-200 rounded-2xl">
+              <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-2xl">
                 <Coffee className="w-10 h-10 text-slate-200 mx-auto mb-3" />
                 <p className="text-slate-500 font-medium">No hay clases este día</p>
                 <p className="text-slate-400 text-sm">Ningún grupo tiene clase en {diaCode}.</p>
@@ -403,6 +499,11 @@ export default function HoyPage() {
                                 title={phone ? 'Abrir WhatsApp con el recordatorio' : 'Sin teléfono: se abrirá WhatsApp para elegir contacto'}>
                                 <MessageCircle className="w-4 h-4" /> Recordar por WhatsApp
                               </button>
+                              <button onClick={() => setModalRec({ alumnaId: d.id })}
+                                className="px-3 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium transition active:scale-95"
+                                title="Apuntar un tema para hablar con ella">
+                                <Bell className="w-4 h-4" />
+                              </button>
                               <button onClick={() => copiar(d)} disabled={!d.pago_token}
                                 className={`px-3 py-2.5 rounded-xl border text-sm font-medium transition active:scale-95 disabled:opacity-40 ${
                                   copiedId === d.id ? 'border-emerald-300 text-emerald-600 bg-emerald-50' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -425,6 +526,85 @@ export default function HoyPage() {
             })}
           </>
         )}
+      </div>
+
+      {modalRec && (
+        <RecordatorioModal
+          alumnas={alumnasTodas}
+          alumnaIdInicial={modalRec.alumnaId}
+          fechaInicial={fechaStr}
+          onSave={crearRec}
+          onClose={() => setModalRec(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Modal para apuntar un recordatorio ──────────────────────────────────────
+function RecordatorioModal({ alumnas, alumnaIdInicial, fechaInicial, onSave, onClose }: {
+  alumnas: { id: string; nombre: string }[]
+  alumnaIdInicial: string | null
+  fechaInicial: string
+  onSave: (titulo: string, fecha: string, alumnaId: string | null) => Promise<string | null>
+  onClose: () => void
+}) {
+  const [titulo, setTitulo] = useState('')
+  const [fecha, setFecha] = useState(fechaInicial)
+  const [alumnaId, setAlumnaId] = useState<string>(alumnaIdInicial ?? '')
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const backdrop = useBackdropClose(onClose)
+
+  const guardar = async () => {
+    if (!titulo.trim() || !fecha) return
+    setGuardando(true); setError(null)
+    const err = await onSave(titulo.trim(), fecha, alumnaId || null)
+    setGuardando(false)
+    if (err) { setError(err); return }
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" {...backdrop}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 animate-fade-in" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <h3 className="font-semibold text-slate-900">Nuevo recordatorio</h3>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-xl"><X className="w-4 h-4 text-slate-400" /></button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">¿Qué tienes que tratar? *</label>
+            <textarea value={titulo} onChange={e => setTitulo(e.target.value)} rows={2} autoFocus
+              placeholder="Ej: Hablar de sus faltas de asistencia"
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Alumna (opcional)</label>
+            <select value={alumnaId} onChange={e => setAlumnaId(e.target.value)}
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              <option value="">— Sin alumna concreta —</option>
+              {alumnas.map(a => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Recordármelo el día *</label>
+            <input type="date" value={fecha} onChange={e => setFecha(e.target.value)}
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <p className="text-[11px] text-slate-400 mt-1">Si ese día no lo marcas como hecho, seguirá saliendo como atrasado.</p>
+          </div>
+          {error && <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{error}</p>}
+          <div className="flex gap-3 pt-1">
+            <button onClick={onClose} disabled={guardando}
+              className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition disabled:opacity-50">
+              Cancelar
+            </button>
+            <button onClick={guardar} disabled={guardando || !titulo.trim() || !fecha}
+              className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition disabled:opacity-40">
+              {guardando ? 'Guardando…' : 'Guardar'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )

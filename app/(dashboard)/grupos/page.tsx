@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Grupo, DIA_COLORS, MESES_FULL } from '@/lib/types'
+import { kvGet } from '@/lib/kv'
+import { PaymentCalendar } from '@/lib/nomina'
 import { Plus, X, Trash2, UsersRound, Clock, User } from 'lucide-react'
 import { useBackdropClose } from '@/lib/useBackdropClose'
 
@@ -14,6 +16,7 @@ const DIA_NAMES: Record<string, string> = {
 
 export default function GruposPage() {
   const [grupos, setGrupos] = useState<Grupo[]>([])
+  const [calendarios, setCalendarios] = useState<PaymentCalendar[]>([])
   const [modal, setModal] = useState<Grupo | null | 'new'>(null)
   const [loading, setLoading] = useState(true)
   const supabase = createClient()
@@ -21,8 +24,12 @@ export default function GruposPage() {
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    const { data } = await supabase.from('grupos').select('*').eq('user_id', user.id).order('dia')
+    const [{ data }, cals] = await Promise.all([
+      supabase.from('grupos').select('*').eq('user_id', user.id).order('dia'),
+      kvGet<PaymentCalendar[]>(supabase, 'payment_calendars_v2'),
+    ])
     setGrupos(data ?? [])
+    setCalendarios(Array.isArray(cals) ? cals : [])
     setLoading(false)
   }, [])
 
@@ -153,6 +160,7 @@ export default function GruposPage() {
       {modal !== null && (
         <GrupoModal
           grupo={modal === 'new' ? null : modal}
+          calendarios={calendarios}
           onSave={handleSave}
           onClose={() => setModal(null)}
         />
@@ -161,8 +169,9 @@ export default function GruposPage() {
   )
 }
 
-function GrupoModal({ grupo, onSave, onClose }: {
+function GrupoModal({ grupo, calendarios, onSave, onClose }: {
   grupo: Grupo | null
+  calendarios: PaymentCalendar[]
   onSave: (d: Partial<Grupo>) => void
   onClose: () => void
 }) {
@@ -173,6 +182,7 @@ function GrupoModal({ grupo, onSave, onClose }: {
   const hoy = new Date()
   const [anioInicio, setAnioInicio] = useState<number>(grupo?.anio_inicio ?? hoy.getFullYear())
   const [mesInicio, setMesInicio] = useState<number>(grupo?.mes_inicio ?? (hoy.getMonth() + 1))
+  const [calendarioId, setCalendarioId] = useState<string>(grupo?.calendario_id ?? '')
 
   const handleSubmit = () => {
     if (!nombre.trim()) return
@@ -184,6 +194,7 @@ function GrupoModal({ grupo, onSave, onClose }: {
       color: DIA_COLORS[dia]?.bg ?? '#94A3B8',
       anio_inicio: anioInicio,
       mes_inicio: mesInicio,
+      calendario_id: calendarioId || null,
     })
   }
 
@@ -272,6 +283,22 @@ function GrupoModal({ grupo, onSave, onClose }: {
               </select>
             </div>
             <p className="text-xs text-slate-400 mt-1">Las cuadrículas de Colegiaturas y Bachillerato ocultarán los meses anteriores a este.</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Calendario de pagos</label>
+            <select
+              value={calendarioId}
+              onChange={e => setCalendarioId(e.target.value)}
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="">— Sin calendario —</option>
+              {calendarios.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </select>
+            <p className="text-xs text-slate-400 mt-1">
+              De aquí salen las fechas de pago y el sueldo de la docente
+              ($75 × alumnas × semanas hasta el siguiente pago).
+            </p>
           </div>
 
           <div className="flex gap-3 pt-1">

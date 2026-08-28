@@ -28,7 +28,21 @@ export interface Grupo {
   maestra: string | null
   anio_inicio: number | null
   mes_inicio: number | null
+  /** id del calendario de pagos (app_kv `payment_calendars_v2`) al que pertenece
+   *  este grupo. No se deduce por nombre: "SVLE" usa el calendario "SMLE". */
+  calendario_id: string | null
   created_at: string
+}
+
+export interface Recordatorio {
+  id: string
+  user_id: string
+  alumna_id: string | null
+  titulo: string
+  fecha: string      // 'YYYY-MM-DD'
+  hecho: boolean
+  created_at: string
+  alumna?: { nombre: string } | null
 }
 
 export interface Alumna {
