@@ -59,6 +59,20 @@ netlify deploy --build --prod
 - **V2** = `main` (actual, con todo el módulo de pagos). Volver a V1 = redeploy desde `v1`.
 
 ## Páginas (`app/(dashboard)/` salvo `/pagar`)
+- `hoy/` — **"Mi día"** (28 ago 2026), primera del menú. Guion de lo que hay que resolver
+  ese día, para abrirlo al llegar a las 9:00. Dos bloques:
+  1. **Pagos que debo hacer**: la docente de cada grupo que da clase ese día + los fijos de
+     sábado (Alex $3,000 / Isela $1,500, confirmados por Alex). Los sueldos de las docentes
+     **NO son fijos** (varían por día y grupo: Ximena $1,800 vie vs $2,400 sáb), así que solo
+     se muestra como referencia su **último pago del MISMO día de la semana** — nunca una
+     cifra inventada. Se marcan como pagados **solos** cuando el egreso se registra en Caja
+     con categoría `sueldos` (match por nombre de pila, tolera "Isela"/"Isella"); no hay
+     doble captura ni checkbox manual.
+  2. **Grupos del día** (`grupos.dia` = día de hoy) con las alumnas que deben colegiatura /
+     bachillerato, meses y montos faltantes, días de atraso, botón WhatsApp + enlace de pago
+     (reusa la lógica de `por-cobrar`). Las que están al corriente solo se cuentan.
+  Incluye navegación ◀▶ por día (para preparar el día siguiente) y **"Copiar guion"** que
+  vuelca todo como texto plano. No usa tablas nuevas.
 - `dashboard/` (Panel, client) — KPIs por mes con filtro ◀▶; **Margen** (bachillerato sólo
   por su ganancia >$5000 acumulado por alumna; ambos cuenta col completo + bachi-ganancia);
   **Cobranza pendiente** clickable → modal con alumnas que deben.
