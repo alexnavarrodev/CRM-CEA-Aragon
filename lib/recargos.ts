@@ -55,21 +55,32 @@ export interface RecargoMes {
   /** Fecha en que le tocaba pagar ese mes. Null si su calendario no la tiene. */
   fechaLimite: string | null
   diasTarde: number
-  /** 10% de `falta`, o 0 si aún no se pasa de las 2 semanas. */
+  /** 10% de `falta`, o 0 si aún no se pasa de las 2 semanas o el mes está exento. */
   recargo: number
+  /** true si le habría tocado recargo pero se le perdonó ese mes. */
+  exento: boolean
 }
 
 export interface MesAdeudadoCol { anio: number; mes?: number; falta: number }
 
+/** Clave de una exención: 'anio-mes'. */
+export const claveExencion = (anio: number, mes: number) => `${anio}-${mes}`
+
 /**
  * Recargo de cada mes de colegiatura adeudado.
- * Si el grupo no tiene calendario, o el mes no está en él, no se cobra recargo
- * (nunca se inventa una fecha límite).
+ *
+ * - Si el grupo no tiene calendario, o el mes no está en él, no se cobra recargo
+ *   (nunca se inventa una fecha límite).
+ * - `exentos` lleva las claves 'anio-mes' que Alex perdonó para esa alumna
+ *   (tabla `recargo_exenciones`). El mes exento sale con `recargo: 0` y
+ *   `exento: true`, para poder decirle en el panel que esta vez no se le cobra
+ *   pero que a partir del mes siguiente sí.
  */
 export function recargosColegiatura(
   cal: PaymentCalendar | null | undefined,
   adeudoCol: MesAdeudadoCol[],
   hoyISO: string,
+  exentos?: Set<string> | null,
 ): RecargoMes[] {
   const hoy = parseISO(hoyISO)
   return adeudoCol
@@ -79,10 +90,12 @@ export function recargosColegiatura(
       const lim = fechaLimite ? parseISO(fechaLimite) : null
       const diasTarde = (hoy !== null && lim !== null)
         ? Math.max(0, Math.floor((hoy - lim) / 86400000)) : 0
-      const aplica = diasTarde > RECARGO_DIAS_GRACIA
+      const tocaria = diasTarde > RECARGO_DIAS_GRACIA
+      const exento = !!exentos?.has(claveExencion(m.anio, m.mes!))
       return {
         anio: m.anio, mes: m.mes!, falta: m.falta, fechaLimite, diasTarde,
-        recargo: aplica ? Math.round(m.falta * RECARGO_PCT) : 0,
+        recargo: tocaria && !exento ? Math.round(m.falta * RECARGO_PCT) : 0,
+        exento: exento && tocaria,
       }
     })
 }
@@ -90,4 +103,11 @@ export function recargosColegiatura(
 /** Suma de los recargos aplicables. */
 export function totalRecargo(recargos: RecargoMes[]): number {
   return recargos.reduce((s, r) => s + r.recargo, 0)
+}
+
+/** Filas de `recargo_exenciones` → Set de claves 'anio-mes'. */
+export function setDeExenciones(
+  filas: { anio: number; mes: number }[] | null | undefined,
+): Set<string> {
+  return new Set((filas ?? []).map(f => claveExencion(f.anio, f.mes)))
 }

@@ -9,7 +9,7 @@ import {
 } from './acumulacion'
 import { EXTRA_TARGET, EXTRA_LABEL } from './extras'
 import type { PaymentCalendar } from './nomina'
-import { recargosColegiatura, totalRecargo } from './recargos'
+import { recargosColegiatura, totalRecargo, setDeExenciones } from './recargos'
 
 interface AlumnaPago {
   id: string
@@ -66,7 +66,10 @@ export async function aplicarPagoAlumna(
       .select('id, anio, mes, monto, estado').eq('alumna_id', alumna.id)
     colExisting = data ?? []
     const adeudoCol = mesesAdeudadosCol(colExisting, colLimit, anio, mes, inicioGrupo)
-    recargoDebido = totalRecargo(recargosColegiatura(calendario, adeudoCol, hoyISO))
+    const { data: exFilas } = await supabase.from('recargo_exenciones')
+      .select('anio, mes').eq('alumna_id', alumna.id)
+    recargoDebido = totalRecargo(
+      recargosColegiatura(calendario, adeudoCol, hoyISO, setDeExenciones(exFilas)))
   }
   if (esBachi) {
     const { data } = await supabase.from('pagos_bachillerato')

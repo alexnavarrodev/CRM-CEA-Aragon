@@ -13,7 +13,7 @@ import {
 } from '@/lib/extras'
 import type { PaymentCalendar } from '@/lib/nomina'
 import {
-  recargosColegiatura, totalRecargo, proximaFechaPago, RECARGO_DIAS_GRACIA,
+  recargosColegiatura, totalRecargo, proximaFechaPago, setDeExenciones, RECARGO_DIAS_GRACIA,
 } from '@/lib/recargos'
 import BotonPagar from './BotonPagar'
 
@@ -116,8 +116,12 @@ export default async function PagarPage({ params, searchParams }: {
 
   // ── Recargo por pago tardío (10% por cada mes de colegiatura con +2 semanas) ──
   const hoyISO = new Date(Date.UTC(hoyAnio, hoyMes - 1, hoyDia)).toISOString().slice(0, 10)
-  const recargos = recargosColegiatura(calendario, adeudoCol, hoyISO)
+  const { data: exFilas } = await supabase.from('recargo_exenciones')
+    .select('anio, mes').eq('alumna_id', alumna.id)
+  const exentos = setDeExenciones(exFilas)
+  const recargos = recargosColegiatura(calendario, adeudoCol, hoyISO, exentos)
   const recargoTotal = totalRecargo(recargos)
+  const hayExencion = recargos.some(r => r.exento)
   const mensTotal = mensBruto + recargoTotal
   const proximoPago = proximaFechaPago(calendario, hoyISO)
 
@@ -201,6 +205,12 @@ export default async function PagarPage({ params, searchParams }: {
                           <span className="text-red-300 text-xs tabular-nums">+{fmt(r.recargo)}</span>
                         </div>
                       )}
+                      {r?.exento && (
+                        <div className="flex items-center justify-between mt-0.5">
+                          <span className="text-emerald-300 text-xs">✓ Sin recargo por esta ocasión</span>
+                          <span className="text-emerald-300 text-xs tabular-nums">+$0</span>
+                        </div>
+                      )}
                     </li>
                   )
                 })}
@@ -212,11 +222,20 @@ export default async function PagarPage({ params, searchParams }: {
                 ))}
               </ul>
               {recargoTotal > 0 && (
-                <p className="px-4 pb-2 text-red-300/80 text-xs">
-                  Incluye {fmt(recargoTotal)} de recargo: se aplica un 10% a cada mensualidad
-                  con más de {RECARGO_DIAS_GRACIA} días de retraso.
+                <p className="px-4 pb-1 text-red-300/80 text-xs">
+                  Incluye {fmt(recargoTotal)} de recargo por pago tardío.
                 </p>
               )}
+              {hayExencion && (
+                <p className="px-4 pb-1 text-emerald-300/90 text-xs">
+                  🎁 Esta vez no se te aplica recargo, aunque ya pasó la fecha.
+                </p>
+              )}
+              {/* Aviso permanente: que nadie pueda decir que no se le informó. */}
+              <p className="px-4 pb-2 text-white/40 text-xs">
+                A partir de la próxima colegiatura, si pasan más de {RECARGO_DIAS_GRACIA} días
+                de tu fecha de pago se aplica un recargo del 10%.
+              </p>
               <div className="p-3 pt-1">
                 <BotonPagar token={token} concepto="mensualidad" label={`💳 Pagar mensualidad · ${fmt(mensTotal)}`} />
               </div>

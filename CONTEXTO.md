@@ -168,6 +168,13 @@ netlify deploy --build --prod
     parcialmente pagado. En Caja entra el total, con el recargo anotado en el concepto.
   · El panel (`pagar/[token]`) y el checkout usan **el mismo cálculo**, para que el importe
     cobrado coincida siempre con el que la alumna vio.
+  · **Exenciones** (tabla `recargo_exenciones`, una fila = alumna + año + mes): perdonan el
+    recargo de ESE mes concreto, no para siempre. Se creó porque el recargo se implantó sin
+    aviso previo: Alex perdonó agosto 2026 a Jacqueline Ocaña y Jenifer García. En octubre
+    su agosto sigue exento pero septiembre ya les cobra, que es justo lo buscado.
+    Hoy se dan de alta por script; **no hay UI todavía**.
+  · El panel lleva un **aviso permanente** de que a partir de la próxima colegiatura se
+    aplica el 10% — para que nadie pueda decir que no se le informó.
 - **Sueldo de las docentes** (`lib/nomina.ts`): **$75 × alumnas activas del grupo × semanas
   hasta el siguiente pago**. Las semanas salen del calendario del grupo (distancia entre la
   fecha de pago y la siguiente: 4 o 5 según el mes), y se paga **el día de la fecha de pago**,
@@ -200,6 +207,8 @@ netlify deploy --build --prod
   datos que crecen en user_metadata. SQL: `supabase-app-kv.sql`.
 - `documentacion_bachillerato` (27 jun 2026, RLS por user_id): checklist de papeles por alumna
   para la página `documentacion/`. SQL: `supabase-documentacion-bachillerato.sql`.
+- `recargo_exenciones` (28 ago 2026, RLS por user_id): perdona el recargo de un mes concreto
+  a una alumna (único por alumna+año+mes). SQL: `supabase-recargo-exenciones.sql`. FALTA en Atenea.
 - `recordatorios` (28 ago 2026, RLS por user_id): notas con fecha para la página `hoy/`
   (`alumna_id` opcional, `hecho` bool). SQL: `supabase-recordatorios.sql` (ese archivo añade
   también `grupos.calendario_id`). Corrido en Aragón; FALTA en Atenea.

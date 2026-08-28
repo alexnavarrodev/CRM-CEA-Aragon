@@ -7,7 +7,7 @@ import { createClient } from '@supabase/supabase-js'
 import { mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, inicioCobro } from '@/lib/acumulacion'
 import { EXTRA_TARGET, EXTRA_LABEL } from '@/lib/extras'
 import type { PaymentCalendar } from '@/lib/nomina'
-import { recargosColegiatura, totalRecargo } from '@/lib/recargos'
+import { recargosColegiatura, totalRecargo, setDeExenciones } from '@/lib/recargos'
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL || 'https://crm-cea-aragon.netlify.app'
 
@@ -79,9 +79,11 @@ export async function POST(req: NextRequest) {
       const { data } = await supabase.from('pagos_bachillerato').select('id, anio, tipo, monto, estado').eq('alumna_id', alumna.id)
       total += mesesAdeudadosBachi(data ?? [], 1000, y, mesToBachiTipo(m), inicioGrupo).reduce((s, x) => s + x.falta, 0)
     }
-    // Recargo por pago tardío: el mismo cálculo que muestra el panel, para que el
-    // importe cobrado coincida siempre con lo que la alumna vio.
-    total += totalRecargo(recargosColegiatura(calendario, adeudoCol, hoyISO))
+    // Recargo por pago tardío: el mismo cálculo que muestra el panel (exenciones
+    // incluidas), para que el importe cobrado coincida siempre con lo que la alumna vio.
+    const { data: exFilas } = await supabase.from('recargo_exenciones')
+      .select('anio, mes').eq('alumna_id', alumna.id)
+    total += totalRecargo(recargosColegiatura(calendario, adeudoCol, hoyISO, setDeExenciones(exFilas)))
     itemTitle = `Colegiatura — ${alumna.nombre}`
   }
 
