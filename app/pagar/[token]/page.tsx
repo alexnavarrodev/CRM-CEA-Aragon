@@ -88,8 +88,14 @@ export default async function PagarPage({ params, searchParams }: {
   const inicioGrupo = inicioCobro(inicioGrupoRaw, alumna.created_at)
 
   // ── Mensualidad ──
-  const adeudoCol = mesesAdeudadosCol(colRows, colLimit, hoyAnio, hoyMes, inicioGrupo)
-  const adeudoBachi = mesesAdeudadosBachi(bachiRows, 1000, hoyAnio, mesToBachiTipo(hoyMes), inicioGrupo)
+  // ⚠️ Cada cálculo SOLO si la alumna está en ese programa. `mesesAdeudados*` arranca en el
+  // inicio del curso aunque no haya ningún registro, así que llamarlo para un programa que
+  // la alumna no cursa le inventa deuda (a Jacqueline Ocaña, sólo colegiaturas, le salieron
+  // $4,000 de bachillerato fantasma en su enlace público, 28 ago 2026).
+  const adeudoCol = esCol
+    ? mesesAdeudadosCol(colRows, colLimit, hoyAnio, hoyMes, inicioGrupo) : []
+  const adeudoBachi = esBachi
+    ? mesesAdeudadosBachi(bachiRows, 1000, hoyAnio, mesToBachiTipo(hoyMes), inicioGrupo) : []
   const mensBruto = adeudoCol.reduce((s, m) => s + m.falta, 0) + adeudoBachi.reduce((s, m) => s + m.falta, 0)
   const descuento = aplicaDescuentoProntoPago(alumna.programa, hoyDia, adeudoCol, hoyAnio, hoyMes, colLimit) ? PRONTO_PAGO_MONTO : 0
   const mensTotal = Math.max(0, mensBruto - descuento)
