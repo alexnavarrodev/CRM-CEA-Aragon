@@ -5,7 +5,8 @@ import { createClient } from '@/lib/supabase/client'
 import { Grupo, MESES_FULL, DIA_COLORS, Recordatorio } from '@/lib/types'
 import { kvGet } from '@/lib/kv'
 import { mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, TIPOS_BACHI, inicioCobro } from '@/lib/acumulacion'
-import { PaymentCalendar, sueldoDocente, SueldoCalculado } from '@/lib/nomina'
+import type { PaymentCalendar, SueldoCalculado } from '@/lib/nomina'
+import { sueldoDocente } from '@/lib/nomina'
 import { useBackdropClose } from '@/lib/useBackdropClose'
 import {
   MessageCircle, Link2, Check, Phone, Banknote, ClipboardCopy, Plus, X,

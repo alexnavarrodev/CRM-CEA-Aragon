@@ -113,12 +113,16 @@ netlify deploy --build --prod
 ## Módulo de pagos — arquitectura
 - **`lib/acumulacion.ts`** (PURO, cliente+servidor): `colMonthSequence`/`bachiMonthSequence`,
   `mesToBachiTipo`, `saldoPagado`, `planColegiatura`/`planBachillerato` (acumulan al mes más
-  antiguo pendiente y rebosan), `mesesAdeudadosCol`/`Bachi`, `aplicaDescuentoProntoPago`
-  (+constantes `PRONTO_PAGO_MONTO=50`, `PRONTO_PAGO_DIA_LIMITE=20`).
+  antiguo pendiente y rebosan), `mesesAdeudadosCol`/`Bachi`, `inicioCobro`.
+  El descuento de pronto pago se ELIMINÓ el 28 ago 2026 (ver Reglas de negocio).
 - **`lib/extras.ts`** (PURO): rcp/uniforme/certificado. `EXTRA_TARGET` (rcp 1200, uniforme 1500,
   certificado 7000), `EXTRA_LABEL`, plazos (`UNIFORME_MESES_LIMITE=2`, `CERTIFICADO_MES_LIMITE=8`,
   RCP sin plazo), `mesesTranscurridos`, `estadoExtra` (falta/completo/vencido/porVencer).
-- **`lib/pagos-server.ts`** (SERVIDOR): `aplicarPagoAlumna` (col/bachi/ambos + descuento),
+- **`lib/nomina.ts`** (PURO): sueldo de docentes ($75 × alumnas × semanas al siguiente pago).
+- **`lib/recargos.ts`** (PURO): recargo por pago tardío (10% por mes de colegiatura con más
+  de 14 días de retraso), `proximaFechaPago`, `fechaPagoDeMes`. Se alimenta del calendario
+  del grupo (`grupos.calendario_id`).
+- **`lib/pagos-server.ts`** (SERVIDOR): `aplicarPagoAlumna` (col/bachi/ambos + recargo),
   `aplicarPagoExtra` (uniforme/certificado → pagos_extras + caja, **RCP aún NO incluido aquí**
   — no está en el checkout público, solo se registra desde Caja/Alumnas/pagos-extra),
   `enviarAvisoPago` (Resend).
@@ -150,9 +154,20 @@ netlify deploy --build --prod
   (no cuentan) y lo que pague de ahí en adelante es ganancia (lib/margen.ts → `gananciaBachiDelMes`).
   Colegiatura cuenta completa; en 'ambos' la mitad es col (completa) + mitad bachi (sólo ganancia).
   El margen mensual queda disparejo a propósito (meses iniciales bajos hasta cubrir el costo).
-- **Descuento pronto pago $50**: programa colegiaturas Y ambos (solo lado colegiatura), si
-  paga antes del día 20 y el mes actual está sin pagar. El mes queda 'pagado' mostrando $1000
-  (la Caja registra el dinero real). En 'ambos': bachillerato completo, colegiatura −$50.
+- **Descuento pronto pago $50: ELIMINADO** el 28 ago 2026 a petición de Alex. No reponerlo.
+- **Recargo por pago tardío (28 ago 2026)**: si pasan **más de 14 días** desde la fecha de
+  pago que le toca a su grupo (la del calendario), esa mensualidad suma un **10%**.
+  · Es **por cada mes** atrasado, no una vez sobre el total.
+  · **Solo colegiatura**: el bachillerato nunca genera recargo (en 'ambos', el 10% se calcula
+    sobre los $1,000 de colegiatura, no sobre los $2,000).
+  · Se calcula sobre lo que queda a deber de ese mes, así que si ya abonó parte, baja.
+  · Si el grupo no tiene calendario, o el mes no está en él, **no se cobra recargo** (nunca se
+    inventa una fecha límite).
+  · ⚠️ El recargo **no es colegiatura**: `aplicarPagoAlumna` lo aparta antes de repartir el
+    pago entre los meses, porque si no el 10% rebosaría al mes siguiente dándolo por
+    parcialmente pagado. En Caja entra el total, con el recargo anotado en el concepto.
+  · El panel (`pagar/[token]`) y el checkout usan **el mismo cálculo**, para que el importe
+    cobrado coincida siempre con el que la alumna vio.
 - **Sueldo de las docentes** (`lib/nomina.ts`): **$75 × alumnas activas del grupo × semanas
   hasta el siguiente pago**. Las semanas salen del calendario del grupo (distancia entre la
   fecha de pago y la siguiente: 4 o 5 según el mes), y se paga **el día de la fecha de pago**,

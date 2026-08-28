@@ -4,8 +4,10 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, aplicaDescuentoProntoPago, PRONTO_PAGO_MONTO, inicioCobro } from '@/lib/acumulacion'
+import { mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, inicioCobro } from '@/lib/acumulacion'
 import { EXTRA_TARGET, EXTRA_LABEL } from '@/lib/extras'
+import type { PaymentCalendar } from '@/lib/nomina'
+import { recargosColegiatura, totalRecargo } from '@/lib/recargos'
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL || 'https://crm-cea-aragon.netlify.app'
 
@@ -27,7 +29,7 @@ export async function POST(req: NextRequest) {
 
   const supabase = admin()
   const { data: alumna } = await supabase
-    .from('alumnas').select('id, nombre, programa, cuota_mensual, grupo_id, created_at')
+    .from('alumnas').select('id, user_id, nombre, programa, cuota_mensual, grupo_id, created_at')
     .eq('pago_token', token).maybeSingle()
   if (!alumna) return NextResponse.json({ error: 'Alumna no encontrada' }, { status: 404 })
 
@@ -37,12 +39,20 @@ export async function POST(req: NextRequest) {
   // Desde cuándo se le puede cobrar: sin esto, una alumna sin ningún registro de pago
   // daría total 0 y no podría pagar en línea.
   let inicioGrupoRaw: { anio: number; mes: number } | null = null
+  let calendario: PaymentCalendar | null = null
   if (alumna.grupo_id) {
     const { data: g } = await supabase.from('grupos')
-      .select('anio_inicio, mes_inicio').eq('id', alumna.grupo_id).maybeSingle()
+      .select('anio_inicio, mes_inicio, calendario_id').eq('id', alumna.grupo_id).maybeSingle()
     if (g?.anio_inicio && g?.mes_inicio) inicioGrupoRaw = { anio: g.anio_inicio, mes: g.mes_inicio }
+    if (g?.calendario_id) {
+      const { data: kv } = await supabase.from('app_kv')
+        .select('value').eq('user_id', alumna.user_id).eq('key', 'payment_calendars_v2').maybeSingle()
+      const cals = Array.isArray(kv?.value) ? (kv!.value as PaymentCalendar[]) : []
+      calendario = cals.find(c => c.id === g.calendario_id) ?? null
+    }
   }
   const inicioGrupo = inicioCobro(inicioGrupoRaw, alumna.created_at)
+  const hoyISO = new Date(Date.UTC(y, m - 1, now.getUTCDate())).toISOString().slice(0, 10)
 
   let total = 0
   let itemTitle = ''
@@ -69,9 +79,9 @@ export async function POST(req: NextRequest) {
       const { data } = await supabase.from('pagos_bachillerato').select('id, anio, tipo, monto, estado').eq('alumna_id', alumna.id)
       total += mesesAdeudadosBachi(data ?? [], 1000, y, mesToBachiTipo(m), inicioGrupo).reduce((s, x) => s + x.falta, 0)
     }
-    const descuento = aplicaDescuentoProntoPago(alumna.programa, now.getUTCDate(), adeudoCol, y, m, colLimit)
-      ? PRONTO_PAGO_MONTO : 0
-    total = Math.max(0, total - descuento)
+    // Recargo por pago tardío: el mismo cálculo que muestra el panel, para que el
+    // importe cobrado coincida siempre con lo que la alumna vio.
+    total += totalRecargo(recargosColegiatura(calendario, adeudoCol, hoyISO))
     itemTitle = `Colegiatura — ${alumna.nombre}`
   }
 

@@ -5,10 +5,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   planColegiatura, planBachillerato, mesToBachiTipo,
-  mesesAdeudadosCol, mesesAdeudadosBachi, aplicaDescuentoProntoPago, PRONTO_PAGO_MONTO,
-  inicioCobro,
+  mesesAdeudadosCol, mesesAdeudadosBachi, inicioCobro,
 } from './acumulacion'
 import { EXTRA_TARGET, EXTRA_LABEL } from './extras'
+import type { PaymentCalendar } from './nomina'
+import { recargosColegiatura, totalRecargo } from './recargos'
 
 interface AlumnaPago {
   id: string
@@ -39,24 +40,33 @@ export async function aplicarPagoAlumna(
   const colLimit = alumna.programa === 'ambos' ? 1000 : (Number(alumna.cuota_mensual) || 1000)
 
   // Desde cuándo se le puede cobrar (necesario si aún no tiene ningún registro de pago)
+  // y calendario de su grupo (para el recargo por pago tardío).
   let inicioGrupoRaw: { anio: number; mes: number } | null = null
+  let calendario: PaymentCalendar | null = null
   if (alumna.grupo_id) {
     const { data: g } = await supabase.from('grupos')
-      .select('anio_inicio, mes_inicio').eq('id', alumna.grupo_id).maybeSingle()
+      .select('anio_inicio, mes_inicio, calendario_id').eq('id', alumna.grupo_id).maybeSingle()
     if (g?.anio_inicio && g?.mes_inicio) inicioGrupoRaw = { anio: g.anio_inicio, mes: g.mes_inicio }
+    if (g?.calendario_id) {
+      const { data: kv } = await supabase.from('app_kv')
+        .select('value').eq('user_id', alumna.user_id).eq('key', 'payment_calendars_v2').maybeSingle()
+      const cals = Array.isArray(kv?.value) ? (kv!.value as PaymentCalendar[]) : []
+      calendario = cals.find(c => c.id === g.calendario_id) ?? null
+    }
   }
   const inicioGrupo = inicioCobro(inicioGrupoRaw, alumna.created_at)
+  const hoyISO = new Date(Date.UTC(anio, mes - 1, diaHoy)).toISOString().slice(0, 10)
 
-  // Prefetch + descuento pronto pago (solo sobre colegiatura)
+  // Prefetch + recargo por pago tardío (sólo sobre colegiatura)
   let colExisting: { id: string; anio: number; mes: number; monto: number; estado: string }[] = []
   let bachiExisting: { id: string; anio: number; tipo: string; monto: number; estado: string }[] = []
-  let desc = 0
+  let recargoDebido = 0
   if (esCol) {
     const { data } = await supabase.from('pagos_colegiaturas')
       .select('id, anio, mes, monto, estado').eq('alumna_id', alumna.id)
     colExisting = data ?? []
     const adeudoCol = mesesAdeudadosCol(colExisting, colLimit, anio, mes, inicioGrupo)
-    desc = aplicaDescuentoProntoPago(alumna.programa, diaHoy, adeudoCol, anio, mes, colLimit) ? PRONTO_PAGO_MONTO : 0
+    recargoDebido = totalRecargo(recargosColegiatura(calendario, adeudoCol, hoyISO))
   }
   if (esBachi) {
     const { data } = await supabase.from('pagos_bachillerato')
@@ -64,18 +74,17 @@ export async function aplicarPagoAlumna(
     bachiExisting = data ?? []
   }
 
+  // El recargo NO es colegiatura: se aparta antes de repartir el pago entre los meses.
+  // Si se dejara dentro, el 10% rebosaría al mes siguiente y lo daría por pagado en parte.
+  const recargo = Math.min(recargoDebido, monto)
+  const montoMeses = monto - recargo
+
   const aplicarCol = async (m: number) => {
     if (m <= 0) return
     const plan = planColegiatura(colExisting, m, anio, mes, colLimit)
     for (const w of plan) {
-      let estado = w.estado
-      let montoW = w.monto
-      // Descuento: completar el mes actual y mostrarlo como cuota completa
-      if (desc > 0 && w.anio === anio && w.mes === mes && estado === 'parcial'
-          && (colLimit - w.monto) <= desc) {
-        estado = 'pagado'
-        montoW = colLimit
-      }
+      const estado = w.estado
+      const montoW = w.monto
       if (w.id) {
         await supabase.from('pagos_colegiaturas')
           .update({ monto: montoW, estado, fecha_pago: fecha }).eq('id', w.id)
@@ -105,28 +114,28 @@ export async function aplicarPagoAlumna(
   }
 
   if (alumna.programa === 'ambos') {
-    if (desc > 0) {
-      // Descuento solo a colegiatura: bachillerato completo, colegiatura el resto (col - $50)
-      const bachiOwed = mesesAdeudadosBachi(bachiExisting, 1000, anio, mesToBachiTipo(mes), inicioGrupo).reduce((s, x) => s + x.falta, 0)
-      await aplicarCol(monto - bachiOwed)
-      await aplicarBachi(bachiOwed)
-    } else {
-      const mitad = monto / 2
-      await aplicarCol(mitad)
-      await aplicarBachi(mitad)
-    }
+    // Lo que debe de bachillerato va íntegro a bachillerato y el resto a colegiatura
+    // (el recargo ya está fuera de `montoMeses`, así que no descuadra el reparto).
+    const bachiOwed = mesesAdeudadosBachi(bachiExisting, 1000, anio, mesToBachiTipo(mes), inicioGrupo)
+      .reduce((s, x) => s + x.falta, 0)
+    const aBachi = Math.min(bachiOwed, montoMeses)
+    await aplicarCol(montoMeses - aBachi)
+    await aplicarBachi(aBachi)
   } else if (esCol) {
-    await aplicarCol(monto)
+    await aplicarCol(montoMeses)
   } else if (esBachi) {
-    await aplicarBachi(monto)
+    await aplicarBachi(montoMeses)
   }
 
-  // Movimiento en caja (categoría 'ambos' para que el margen lo trate 50-50)
+  // Movimiento en caja por el total recibido (categoría 'ambos' → el margen lo trata 50-50).
+  // El recargo se deja anotado en el concepto para que se vea de dónde sale el importe.
   const categoria = alumna.programa === 'ambos' ? 'ambos' : (esCol ? 'colegiatura' : 'bachillerato')
   await supabase.from('movimientos_caja').insert({
     user_id: alumna.user_id,
     tipo: 'ingreso',
-    concepto: `Pago en línea — ${alumna.nombre}`,
+    concepto: recargo > 0
+      ? `Pago en línea — ${alumna.nombre} (incluye $${Math.round(recargo).toLocaleString('es-MX')} de recargo)`
+      : `Pago en línea — ${alumna.nombre}`,
     monto,
     canal,
     categoria,

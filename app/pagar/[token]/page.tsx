@@ -5,13 +5,16 @@
 import { createClient } from '@supabase/supabase-js'
 import { MESES_FULL } from '@/lib/types'
 import {
-  mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, TIPOS_BACHI,
-  aplicaDescuentoProntoPago, PRONTO_PAGO_MONTO, PRONTO_PAGO_DIA_LIMITE, inicioCobro,
+  mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, TIPOS_BACHI, inicioCobro,
   type MesAdeudado,
 } from '@/lib/acumulacion'
 import {
   EXTRA_TARGET, estadoExtra, mesesTranscurridos,
 } from '@/lib/extras'
+import type { PaymentCalendar } from '@/lib/nomina'
+import {
+  recargosColegiatura, totalRecargo, proximaFechaPago, RECARGO_DIAS_GRACIA,
+} from '@/lib/recargos'
 import BotonPagar from './BotonPagar'
 
 export const dynamic = 'force-dynamic'
@@ -27,6 +30,11 @@ function adminClient() {
 }
 
 const mesLabelCol = (m: MesAdeudado) => `${MESES_FULL[(m.mes ?? 1) - 1]} ${m.anio}`
+
+/** 'YYYY-MM-DD' → "viernes 18 de septiembre". UTC para no correr el día en UTC−6. */
+const fechaLarga = (iso: string) => new Intl.DateTimeFormat('es-MX', {
+  weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC',
+}).format(new Date(`${iso}T00:00:00Z`))
 const mesLabelBachi = (m: MesAdeudado) => {
   const idx = TIPOS_BACHI.indexOf((m.tipo ?? 'ene') as typeof TIPOS_BACHI[number])
   return `${MESES_FULL[idx]} ${m.anio} (bach.)`
@@ -46,7 +54,7 @@ export default async function PagarPage({ params, searchParams }: {
   const supabase = adminClient()
 
   const { data: alumna } = await supabase
-    .from('alumnas').select('id, nombre, cuota_mensual, programa, status, grupo_id, created_at')
+    .from('alumnas').select('id, user_id, nombre, cuota_mensual, programa, status, grupo_id, created_at')
     .eq('pago_token', token).maybeSingle()
 
   if (!alumna) {
@@ -80,10 +88,18 @@ export default async function PagarPage({ params, searchParams }: {
   // Desde cuándo se le puede cobrar. Imprescindible: sin esto, una alumna que aún no
   // tiene ningún registro de pago vería "no debes nada" en su enlace público.
   let inicioGrupoRaw: { anio: number; mes: number } | null = null
+  let calendario: PaymentCalendar | null = null
   if (alumna.grupo_id) {
     const { data: g } = await supabase.from('grupos')
-      .select('anio_inicio, mes_inicio').eq('id', alumna.grupo_id).maybeSingle()
+      .select('anio_inicio, mes_inicio, calendario_id').eq('id', alumna.grupo_id).maybeSingle()
     if (g?.anio_inicio && g?.mes_inicio) inicioGrupoRaw = { anio: g.anio_inicio, mes: g.mes_inicio }
+    // Calendario de pagos de su grupo: de ahí salen su fecha de pago y el recargo.
+    if (g?.calendario_id) {
+      const { data: kv } = await supabase.from('app_kv')
+        .select('value').eq('user_id', alumna.user_id).eq('key', 'payment_calendars_v2').maybeSingle()
+      const cals = Array.isArray(kv?.value) ? (kv!.value as PaymentCalendar[]) : []
+      calendario = cals.find(c => c.id === g.calendario_id) ?? null
+    }
   }
   const inicioGrupo = inicioCobro(inicioGrupoRaw, alumna.created_at)
 
@@ -97,8 +113,13 @@ export default async function PagarPage({ params, searchParams }: {
   const adeudoBachi = esBachi
     ? mesesAdeudadosBachi(bachiRows, 1000, hoyAnio, mesToBachiTipo(hoyMes), inicioGrupo) : []
   const mensBruto = adeudoCol.reduce((s, m) => s + m.falta, 0) + adeudoBachi.reduce((s, m) => s + m.falta, 0)
-  const descuento = aplicaDescuentoProntoPago(alumna.programa, hoyDia, adeudoCol, hoyAnio, hoyMes, colLimit) ? PRONTO_PAGO_MONTO : 0
-  const mensTotal = Math.max(0, mensBruto - descuento)
+
+  // ── Recargo por pago tardío (10% por cada mes de colegiatura con +2 semanas) ──
+  const hoyISO = new Date(Date.UTC(hoyAnio, hoyMes - 1, hoyDia)).toISOString().slice(0, 10)
+  const recargos = recargosColegiatura(calendario, adeudoCol, hoyISO)
+  const recargoTotal = totalRecargo(recargos)
+  const mensTotal = mensBruto + recargoTotal
+  const proximoPago = proximaFechaPago(calendario, hoyISO)
 
   // ── Inicio de curso (registro más antiguo, o el del grupo) → vencimientos ──
   let start: { anio: number; mes: number } | null = inicioGrupo
@@ -122,6 +143,12 @@ export default async function PagarPage({ params, searchParams }: {
       <div className="text-center mb-6">
         <p className="text-white/40 text-xs uppercase tracking-widest mb-1">Estado de cuenta</p>
         <h1 className="text-2xl font-bold text-white">{alumna.nombre}</h1>
+        {proximoPago && (
+          <p className="text-white/50 text-sm mt-2">
+            Tu próxima fecha de pago:{' '}
+            <span className="text-white font-medium capitalize">{fechaLarga(proximoPago)}</span>
+          </p>
+        )}
       </div>
 
       {pago === 'ok' && (
@@ -151,18 +178,32 @@ export default async function PagarPage({ params, searchParams }: {
             <section className="rounded-2xl bg-white/8 border border-white/10 overflow-hidden">
               <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
                 <span className="text-sm font-semibold text-white">Mensualidad</span>
-                <span className="text-right">
-                  {descuento > 0 && <span className="text-white/40 text-xs line-through mr-1.5">{fmt(mensBruto)}</span>}
-                  <span className="text-white font-bold">{fmt(mensTotal)}</span>
-                </span>
+                <span className="text-white font-bold">{fmt(mensTotal)}</span>
               </div>
               <ul className="px-4 py-1">
-                {adeudoCol.map((m, i) => (
-                  <li key={'c' + i} className="flex items-center justify-between py-1.5 text-sm">
-                    <span className="text-white/70">{mesLabelCol(m)}</span>
-                    <span className="text-white/80 tabular-nums">{fmt(m.falta)}</span>
-                  </li>
-                ))}
+                {adeudoCol.map((m, i) => {
+                  const r = recargos.find(x => x.anio === m.anio && x.mes === m.mes)
+                  return (
+                    <li key={'c' + i} className="py-1.5 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-white/70">{mesLabelCol(m)}</span>
+                        <span className="text-white/80 tabular-nums">{fmt(m.falta)}</span>
+                      </div>
+                      {r?.fechaLimite && (
+                        <p className={`text-xs mt-0.5 ${r.recargo > 0 ? 'text-red-300' : 'text-white/35'}`}>
+                          Fecha de pago: {fechaLarga(r.fechaLimite)}
+                          {r.diasTarde > 0 && ` · ${r.diasTarde} ${r.diasTarde === 1 ? 'día' : 'días'} de retraso`}
+                        </p>
+                      )}
+                      {r && r.recargo > 0 && (
+                        <div className="flex items-center justify-between mt-0.5">
+                          <span className="text-red-300 text-xs">⚠️ Recargo 10% por pago tardío</span>
+                          <span className="text-red-300 text-xs tabular-nums">+{fmt(r.recargo)}</span>
+                        </div>
+                      )}
+                    </li>
+                  )
+                })}
                 {adeudoBachi.map((m, i) => (
                   <li key={'b' + i} className="flex items-center justify-between py-1.5 text-sm">
                     <span className="text-white/70">{mesLabelBachi(m)}</span>
@@ -170,8 +211,11 @@ export default async function PagarPage({ params, searchParams }: {
                   </li>
                 ))}
               </ul>
-              {descuento > 0 && (
-                <p className="px-4 pb-2 text-emerald-300 text-xs">🎉 Incluye −{fmt(descuento)} por pronto pago (antes del día {PRONTO_PAGO_DIA_LIMITE}).</p>
+              {recargoTotal > 0 && (
+                <p className="px-4 pb-2 text-red-300/80 text-xs">
+                  Incluye {fmt(recargoTotal)} de recargo: se aplica un 10% a cada mensualidad
+                  con más de {RECARGO_DIAS_GRACIA} días de retraso.
+                </p>
               )}
               <div className="p-3 pt-1">
                 <BotonPagar token={token} concepto="mensualidad" label={`💳 Pagar mensualidad · ${fmt(mensTotal)}`} />

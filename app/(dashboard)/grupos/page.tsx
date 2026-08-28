@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Grupo, DIA_COLORS, MESES_FULL } from '@/lib/types'
 import { kvGet } from '@/lib/kv'
-import { PaymentCalendar } from '@/lib/nomina'
+import type { PaymentCalendar } from '@/lib/nomina'
 import { Plus, X, Trash2, UsersRound, Clock, User } from 'lucide-react'
 import { useBackdropClose } from '@/lib/useBackdropClose'
 
