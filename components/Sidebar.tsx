@@ -6,13 +6,14 @@ import { createClient } from '@/lib/supabase/client'
 import {
   LayoutDashboard, CreditCard, GraduationCap, Wallet,
   UserPlus, Users, UserCheck, UsersRound, BarChart2, Settings, LogOut, Search, Mic,
-  ArrowRightLeft, CalendarDays, MessageCircle, ClipboardCheck, ClipboardList,
+  ArrowRightLeft, CalendarDays, MessageCircle, ClipboardCheck, ClipboardList, Sun,
 } from 'lucide-react'
 
 const nav = [
   {
     section: 'OPERACIÓN',
     items: [
+      { href: '/hoy',             label: 'Mi día',         icon: Sun },
       { href: '/dashboard',       label: 'Panel',          icon: LayoutDashboard },
       { href: '/colegiaturas',    label: 'Colegiaturas',   icon: CreditCard },
       { href: '/bachillerato',    label: 'Bachillerato',   icon: GraduationCap },
