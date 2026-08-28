@@ -6,6 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   planColegiatura, planBachillerato, mesToBachiTipo,
   mesesAdeudadosCol, mesesAdeudadosBachi, aplicaDescuentoProntoPago, PRONTO_PAGO_MONTO,
+  inicioCobro,
 } from './acumulacion'
 import { EXTRA_TARGET, EXTRA_LABEL } from './extras'
 
@@ -15,6 +16,8 @@ interface AlumnaPago {
   nombre: string
   programa: string
   cuota_mensual: number
+  grupo_id?: string | null
+  created_at?: string | null
 }
 
 /** Aplica `monto` (MXN) a la alumna: colegiatura / bachillerato / ambos (50-50),
@@ -35,6 +38,15 @@ export async function aplicarPagoAlumna(
   const esBachi = alumna.programa === 'bachillerato' || alumna.programa === 'ambos'
   const colLimit = alumna.programa === 'ambos' ? 1000 : (Number(alumna.cuota_mensual) || 1000)
 
+  // Desde cuándo se le puede cobrar (necesario si aún no tiene ningún registro de pago)
+  let inicioGrupoRaw: { anio: number; mes: number } | null = null
+  if (alumna.grupo_id) {
+    const { data: g } = await supabase.from('grupos')
+      .select('anio_inicio, mes_inicio').eq('id', alumna.grupo_id).maybeSingle()
+    if (g?.anio_inicio && g?.mes_inicio) inicioGrupoRaw = { anio: g.anio_inicio, mes: g.mes_inicio }
+  }
+  const inicioGrupo = inicioCobro(inicioGrupoRaw, alumna.created_at)
+
   // Prefetch + descuento pronto pago (solo sobre colegiatura)
   let colExisting: { id: string; anio: number; mes: number; monto: number; estado: string }[] = []
   let bachiExisting: { id: string; anio: number; tipo: string; monto: number; estado: string }[] = []
@@ -43,7 +55,7 @@ export async function aplicarPagoAlumna(
     const { data } = await supabase.from('pagos_colegiaturas')
       .select('id, anio, mes, monto, estado').eq('alumna_id', alumna.id)
     colExisting = data ?? []
-    const adeudoCol = mesesAdeudadosCol(colExisting, colLimit, anio, mes)
+    const adeudoCol = mesesAdeudadosCol(colExisting, colLimit, anio, mes, inicioGrupo)
     desc = aplicaDescuentoProntoPago(alumna.programa, diaHoy, adeudoCol, anio, mes, colLimit) ? PRONTO_PAGO_MONTO : 0
   }
   if (esBachi) {
@@ -95,7 +107,7 @@ export async function aplicarPagoAlumna(
   if (alumna.programa === 'ambos') {
     if (desc > 0) {
       // Descuento solo a colegiatura: bachillerato completo, colegiatura el resto (col - $50)
-      const bachiOwed = mesesAdeudadosBachi(bachiExisting, 1000, anio, mesToBachiTipo(mes)).reduce((s, x) => s + x.falta, 0)
+      const bachiOwed = mesesAdeudadosBachi(bachiExisting, 1000, anio, mesToBachiTipo(mes), inicioGrupo).reduce((s, x) => s + x.falta, 0)
       await aplicarCol(monto - bachiOwed)
       await aplicarBachi(bachiOwed)
     } else {

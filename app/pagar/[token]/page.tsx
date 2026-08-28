@@ -6,7 +6,7 @@ import { createClient } from '@supabase/supabase-js'
 import { MESES_FULL } from '@/lib/types'
 import {
   mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, TIPOS_BACHI,
-  aplicaDescuentoProntoPago, PRONTO_PAGO_MONTO, PRONTO_PAGO_DIA_LIMITE,
+  aplicaDescuentoProntoPago, PRONTO_PAGO_MONTO, PRONTO_PAGO_DIA_LIMITE, inicioCobro,
   type MesAdeudado,
 } from '@/lib/acumulacion'
 import {
@@ -46,7 +46,7 @@ export default async function PagarPage({ params, searchParams }: {
   const supabase = adminClient()
 
   const { data: alumna } = await supabase
-    .from('alumnas').select('id, nombre, cuota_mensual, programa, status')
+    .from('alumnas').select('id, nombre, cuota_mensual, programa, status, grupo_id, created_at')
     .eq('pago_token', token).maybeSingle()
 
   if (!alumna) {
@@ -77,15 +77,25 @@ export default async function PagarPage({ params, searchParams }: {
   }
   const { data: exrows } = await supabase.from('pagos_extras').select('concepto, monto').eq('alumna_id', alumna.id)
 
+  // Desde cuándo se le puede cobrar. Imprescindible: sin esto, una alumna que aún no
+  // tiene ningún registro de pago vería "no debes nada" en su enlace público.
+  let inicioGrupoRaw: { anio: number; mes: number } | null = null
+  if (alumna.grupo_id) {
+    const { data: g } = await supabase.from('grupos')
+      .select('anio_inicio, mes_inicio').eq('id', alumna.grupo_id).maybeSingle()
+    if (g?.anio_inicio && g?.mes_inicio) inicioGrupoRaw = { anio: g.anio_inicio, mes: g.mes_inicio }
+  }
+  const inicioGrupo = inicioCobro(inicioGrupoRaw, alumna.created_at)
+
   // ── Mensualidad ──
-  const adeudoCol = mesesAdeudadosCol(colRows, colLimit, hoyAnio, hoyMes)
-  const adeudoBachi = mesesAdeudadosBachi(bachiRows, 1000, hoyAnio, mesToBachiTipo(hoyMes))
+  const adeudoCol = mesesAdeudadosCol(colRows, colLimit, hoyAnio, hoyMes, inicioGrupo)
+  const adeudoBachi = mesesAdeudadosBachi(bachiRows, 1000, hoyAnio, mesToBachiTipo(hoyMes), inicioGrupo)
   const mensBruto = adeudoCol.reduce((s, m) => s + m.falta, 0) + adeudoBachi.reduce((s, m) => s + m.falta, 0)
   const descuento = aplicaDescuentoProntoPago(alumna.programa, hoyDia, adeudoCol, hoyAnio, hoyMes, colLimit) ? PRONTO_PAGO_MONTO : 0
   const mensTotal = Math.max(0, mensBruto - descuento)
 
-  // ── Inicio de curso (mes más antiguo con registro) → vencimientos ──
-  let start: { anio: number; mes: number } | null = null
+  // ── Inicio de curso (registro más antiguo, o el del grupo) → vencimientos ──
+  let start: { anio: number; mes: number } | null = inicioGrupo
   for (const p of colRows) if (!start || (p.anio * 12 + p.mes) < (start.anio * 12 + start.mes)) start = { anio: p.anio, mes: p.mes }
   for (const p of bachiRows) {
     const mm = TIPOS_BACHI.indexOf(p.tipo as typeof TIPOS_BACHI[number]) + 1

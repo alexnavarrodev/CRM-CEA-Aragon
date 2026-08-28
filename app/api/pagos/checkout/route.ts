@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, aplicaDescuentoProntoPago, PRONTO_PAGO_MONTO } from '@/lib/acumulacion'
+import { mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, aplicaDescuentoProntoPago, PRONTO_PAGO_MONTO, inicioCobro } from '@/lib/acumulacion'
 import { EXTRA_TARGET, EXTRA_LABEL } from '@/lib/extras'
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL || 'https://crm-cea-aragon.netlify.app'
@@ -27,12 +27,22 @@ export async function POST(req: NextRequest) {
 
   const supabase = admin()
   const { data: alumna } = await supabase
-    .from('alumnas').select('id, nombre, programa, cuota_mensual')
+    .from('alumnas').select('id, nombre, programa, cuota_mensual, grupo_id, created_at')
     .eq('pago_token', token).maybeSingle()
   if (!alumna) return NextResponse.json({ error: 'Alumna no encontrada' }, { status: 404 })
 
   const now = new Date(Date.now() - 6 * 3600 * 1000)
   const y = now.getUTCFullYear(), m = now.getUTCMonth() + 1
+
+  // Desde cuándo se le puede cobrar: sin esto, una alumna sin ningún registro de pago
+  // daría total 0 y no podría pagar en línea.
+  let inicioGrupoRaw: { anio: number; mes: number } | null = null
+  if (alumna.grupo_id) {
+    const { data: g } = await supabase.from('grupos')
+      .select('anio_inicio, mes_inicio').eq('id', alumna.grupo_id).maybeSingle()
+    if (g?.anio_inicio && g?.mes_inicio) inicioGrupoRaw = { anio: g.anio_inicio, mes: g.mes_inicio }
+  }
+  const inicioGrupo = inicioCobro(inicioGrupoRaw, alumna.created_at)
 
   let total = 0
   let itemTitle = ''
@@ -52,12 +62,12 @@ export async function POST(req: NextRequest) {
     let adeudoCol: ReturnType<typeof mesesAdeudadosCol> = []
     if (alumna.programa === 'colegiaturas' || alumna.programa === 'ambos') {
       const { data } = await supabase.from('pagos_colegiaturas').select('id, anio, mes, monto, estado').eq('alumna_id', alumna.id)
-      adeudoCol = mesesAdeudadosCol(data ?? [], colLimit, y, m)
+      adeudoCol = mesesAdeudadosCol(data ?? [], colLimit, y, m, inicioGrupo)
       total += adeudoCol.reduce((s, x) => s + x.falta, 0)
     }
     if (alumna.programa === 'bachillerato' || alumna.programa === 'ambos') {
       const { data } = await supabase.from('pagos_bachillerato').select('id, anio, tipo, monto, estado').eq('alumna_id', alumna.id)
-      total += mesesAdeudadosBachi(data ?? [], 1000, y, mesToBachiTipo(m)).reduce((s, x) => s + x.falta, 0)
+      total += mesesAdeudadosBachi(data ?? [], 1000, y, mesToBachiTipo(m), inicioGrupo).reduce((s, x) => s + x.falta, 0)
     }
     const descuento = aplicaDescuentoProntoPago(alumna.programa, now.getUTCDate(), adeudoCol, y, m, colLimit)
       ? PRONTO_PAGO_MONTO : 0

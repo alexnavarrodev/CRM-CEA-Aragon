@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { MESES_FULL, Grupo, DIA_COLORS } from '@/lib/types'
-import { mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, TIPOS_BACHI } from '@/lib/acumulacion'
+import { mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, TIPOS_BACHI, inicioCobro } from '@/lib/acumulacion'
 import { EXTRA_LABEL, estadoExtra, mesesTranscurridos } from '@/lib/extras'
 import { MessageCircle, Link2, Check, AlertCircle, Phone, AlertTriangle } from 'lucide-react'
 
@@ -39,7 +39,7 @@ export default function PorCobrarPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     const [{ data: al }, { data: col }, { data: ba }, { data: exrows }, { data: gr }] = await Promise.all([
-      supabase.from('alumnas').select('id,nombre,telefono,programa,cuota_mensual,pago_token,grupo_id')
+      supabase.from('alumnas').select('id,nombre,telefono,programa,cuota_mensual,pago_token,grupo_id,created_at')
         .eq('user_id', user.id).eq('status', 'activa'),
       supabase.from('pagos_colegiaturas').select('alumna_id,id,anio,mes,monto,estado').eq('user_id', user.id),
       supabase.from('pagos_bachillerato').select('alumna_id,id,anio,tipo,monto,estado').eq('user_id', user.id),
@@ -55,26 +55,36 @@ export default function PorCobrarPage() {
     const lista: Deudora[] = []
     for (const a of (al ?? [])) {
       const lim = a.programa === 'ambos' ? 1000 : (Number(a.cuota_mensual) || 1000)
+      // Desde cuándo se le puede cobrar: inicio de su grupo, o su alta si entró después.
+      const g = (gr ?? []).find(x => x.id === a.grupo_id)
+      const inicio = inicioCobro(
+        g?.anio_inicio && g?.mes_inicio ? { anio: g.anio_inicio, mes: g.mes_inicio } : null,
+        a.created_at,
+      )
       const meses: MesPend[] = []
       if (a.programa === 'colegiaturas' || a.programa === 'ambos') {
         const ex = (col ?? []).filter(p => p.alumna_id === a.id)
-        mesesAdeudadosCol(ex, lim, hoyA, hoyM).forEach(m =>
+        mesesAdeudadosCol(ex, lim, hoyA, hoyM, inicio).forEach(m =>
           meses.push({ anio: m.anio, mesNum: m.mes!, label: `${MESES_FULL[(m.mes! - 1)]} ${m.anio}`, falta: m.falta }))
       }
       if (a.programa === 'bachillerato' || a.programa === 'ambos') {
         const ex = (ba ?? []).filter(p => p.alumna_id === a.id)
-        mesesAdeudadosBachi(ex, 1000, hoyA, mesToBachiTipo(hoyM)).forEach(m => {
+        mesesAdeudadosBachi(ex, 1000, hoyA, mesToBachiTipo(hoyM), inicio).forEach(m => {
           const idx = TIPOS_BACHI.indexOf((m.tipo ?? 'ene') as typeof TIPOS_BACHI[number])
           meses.push({ anio: m.anio, mesNum: idx + 1, label: `${MESES_FULL[idx]} ${m.anio} (bach.)`, falta: m.falta })
         })
       }
-      // Inicio de curso = mes más antiguo con registro de colegiatura
+      // Inicio de curso para los plazos de uniforme/certificado: su registro más antiguo
+      // o, si no tiene ninguno, el inicio de su grupo.
       const propios = (col ?? []).filter(p => p.alumna_id === a.id)
-      let elapsed: number | null = null
+      let arranque = inicio
       if (propios.length > 0) {
         const ini = propios.reduce((min, p) => (p.anio * 12 + p.mes) < (min.anio * 12 + min.mes) ? p : min)
-        elapsed = mesesTranscurridos(ini.anio, ini.mes, hoyA, hoyM)
+        if (!arranque || (ini.anio * 12 + ini.mes) < (arranque.anio * 12 + arranque.mes)) {
+          arranque = { anio: ini.anio, mes: ini.mes }
+        }
       }
+      const elapsed: number | null = arranque ? mesesTranscurridos(arranque.anio, arranque.mes, hoyA, hoyM) : null
       // Uniforme y certificado pendientes
       const extras: ExtraPend[] = []
       const exA = (exrows ?? []).filter(p => p.alumna_id === a.id)

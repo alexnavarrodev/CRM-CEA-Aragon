@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
   const [alumnaId, conceptoRaw] = externalRef.split('|')
   const concepto = conceptoRaw || 'mensualidad'
   const { data: alumna } = await supabase
-    .from('alumnas').select('id, user_id, nombre, programa, cuota_mensual')
+    .from('alumnas').select('id, user_id, nombre, programa, cuota_mensual, grupo_id, created_at')
     .eq('id', alumnaId).maybeSingle()
   if (!alumna) {
     console.error('Webhook MP: alumna no encontrada', alumnaId)

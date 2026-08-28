@@ -154,15 +154,74 @@ export function planBachillerato(
 
 export interface MesAdeudado { anio: number; mes?: number; tipo?: string; falta: number }
 
-/** Meses de colegiatura con saldo pendiente, desde el primer registro de la alumna
- *  hasta el mes de corte (inclusive). Los meses 'pagado' (incl. $0 pre-inicio) no cuentan. */
-export function mesesAdeudadosCol(existing: PagoExistente[], limit: number, hastaAnio: number, hastaMes: number): MesAdeudado[] {
+/** Mes de arranque del curso de una alumna (normalmente el de su grupo:
+ *  `grupos.anio_inicio` / `grupos.mes_inicio`). */
+export interface InicioCurso { anio: number; mes: number }
+
+/**
+ * Mes desde el que se le puede exigir pago a una alumna: el MÁS TARDÍO entre el inicio
+ * de su grupo y el mes en que se dio de alta.
+ *
+ * ⚠️ No basta con el inicio del grupo: muchas alumnas entran con el curso ya empezado
+ * (Sandra Vera entró en ago 2026 a MMLC, que arrancó en feb) y cobrarles desde el
+ * arranque del grupo inventaría meses de deuda de antes de que existieran. Y no basta
+ * con su primer registro de pago, porque una alumna recién inscrita aún no tiene
+ * ninguno y saldría como "al corriente" debiendo (Daniela Bazán y María Guadalupe
+ * Rodríguez de SMA, 28 ago 2026).
+ *
+ * `created_at` viene en UTC; se pasa a hora de México antes de tomar el mes, para que
+ * un alta de madrugada no se cuente en el mes siguiente.
+ */
+export function inicioCobro(
+  grupoInicio: InicioCurso | null | undefined,
+  alumnaCreatedAt: string | null | undefined,
+): InicioCurso | null {
+  let alta: InicioCurso | null = null
+  if (alumnaCreatedAt) {
+    const t = Date.parse(alumnaCreatedAt)
+    if (!Number.isNaN(t)) {
+      const mx = new Date(t - 6 * 3600 * 1000)
+      alta = { anio: mx.getUTCFullYear(), mes: mx.getUTCMonth() + 1 }
+    }
+  }
+  if (!grupoInicio) return alta
+  if (!alta) return grupoInicio
+  return (alta.anio * 12 + alta.mes) > (grupoInicio.anio * 12 + grupoInicio.mes) ? alta : grupoInicio
+}
+
+/** Índice del mes desde el que se le puede exigir pago a la alumna.
+ *  Es el MÁS ANTIGUO entre el inicio de su grupo y su registro de pago más viejo.
+ *
+ *  ⚠️ El inicio del grupo es imprescindible: sin él, una alumna que todavía no tiene
+ *  NINGÚN registro de pago daba lista vacía y aparecía como "al corriente" aunque
+ *  debiera todo (pasó con Daniela Bazán y María Guadalupe Rodríguez de SMA, 28 ago 2026).
+ *  Antes lo tapaban las filas placeholder de $0; al eliminarlas quedó al descubierto. */
+function indiceInicio<T extends { key: string }>(
+  seq: T[], byKey: Record<string, number>,
+  coincideInicio: (s: T) => boolean, inicio?: InicioCurso | null,
+): number {
+  let firstIdx = seq.length
+  seq.forEach((s, i) => { if (byKey[s.key] !== undefined && i < firstIdx) firstIdx = i })
+  if (inicio) {
+    const iIdx = seq.findIndex(coincideInicio)
+    if (iIdx >= 0 && iIdx < firstIdx) firstIdx = iIdx
+  }
+  return firstIdx
+}
+
+/** Meses de colegiatura con saldo pendiente, desde el inicio del curso (o el primer
+ *  registro de la alumna, lo que sea más antiguo) hasta el mes de corte inclusive.
+ *  Los meses 'pagado' no cuentan. */
+export function mesesAdeudadosCol(
+  existing: PagoExistente[], limit: number, hastaAnio: number, hastaMes: number,
+  inicio?: InicioCurso | null,
+): MesAdeudado[] {
   const seq = colMonthSequence()
   const byKey: Record<string, number> = {}
   for (const p of existing) { if (p.mes != null) byKey[`${p.anio}-${p.mes}`] = saldoPagado(p.estado, p.monto, limit) }
-  if (Object.keys(byKey).length === 0) return []
-  let firstIdx = seq.length
-  seq.forEach((s, i) => { if (byKey[s.key] !== undefined && i < firstIdx) firstIdx = i })
+  const firstIdx = indiceInicio(seq, byKey,
+    s => !!inicio && s.anio === inicio.anio && s.mes === inicio.mes, inicio)
+  if (firstIdx >= seq.length) return []
   let cutoff = seq.findIndex(s => s.anio === hastaAnio && s.mes === hastaMes)
   if (cutoff < 0) cutoff = seq.length - 1
   const out: MesAdeudado[] = []
@@ -174,13 +233,17 @@ export function mesesAdeudadosCol(existing: PagoExistente[], limit: number, hast
 }
 
 /** Igual pero para bachillerato (límite 1000, corte por tipo de mes). */
-export function mesesAdeudadosBachi(existing: PagoExistente[], limit: number, hastaAnio: number, hastaTipo: string): MesAdeudado[] {
+export function mesesAdeudadosBachi(
+  existing: PagoExistente[], limit: number, hastaAnio: number, hastaTipo: string,
+  inicio?: InicioCurso | null,
+): MesAdeudado[] {
   const seq = bachiMonthSequence()
   const byKey: Record<string, number> = {}
   for (const p of existing) { if (p.tipo) byKey[`${p.anio}-${p.tipo}`] = saldoPagado(p.estado, p.monto, limit) }
-  if (Object.keys(byKey).length === 0) return []
-  let firstIdx = seq.length
-  seq.forEach((s, i) => { if (byKey[s.key] !== undefined && i < firstIdx) firstIdx = i })
+  const tipoInicio = inicio ? TIPOS_BACHI[inicio.mes - 1] : null
+  const firstIdx = indiceInicio(seq, byKey,
+    s => !!inicio && s.anio === inicio.anio && s.tipo === tipoInicio, inicio)
+  if (firstIdx >= seq.length) return []
   let cutoff = seq.findIndex(s => s.anio === hastaAnio && s.tipo === hastaTipo)
   if (cutoff < 0) cutoff = seq.length - 1
   const out: MesAdeudado[] = []

@@ -133,6 +133,17 @@ netlify deploy --build --prod
   aunque tenga monto placeholder).
 - **Acumulación**: el pago va al mes más antiguo sin pagar y rebosa; límite $1000/mes
   (colegiatura ambos=1000, colegiatura pura=cuota; bachillerato=1000).
+- **Desde cuándo se le cobra a una alumna** (`inicioCobro` en `lib/acumulacion.ts`): el mes
+  **más tardío** entre el inicio de su grupo y el mes de su `created_at` (alta en el CRM), y
+  si además tiene un registro de pago aún más antiguo, ese. Las tres piezas son necesarias:
+  · Sin el inicio del grupo, una alumna recién inscrita **sin ningún registro de pago** daba
+    lista vacía y salía como "al corriente" debiendo (Daniela Bazán y María Guadalupe
+    Rodríguez de SMA, 28 ago 2026). Antes lo tapaban las filas placeholder de $0.
+  · Sin la fecha de alta, a quien entra con el curso empezado se le inventarían meses de
+    deuda anteriores a su ingreso (Sandra Vera entró en ago a MMLC, que arrancó en feb:
+    le habría salido $6,000 falsos). Se comprobó sobre las 9 alumnas afectadas.
+  Lo usan `hoy/`, `por-cobrar/`, `pagar/[token]`, `api/pagos/checkout` y `pagos-server.ts`
+  — si se añade otro cálculo de adeudo, tiene que pasar por aquí también.
 - **'ambos'** = $2000 = $1000 col + $1000 bachi (split 50/50).
 - **Margen** (Panel y Caja): el bachillerato SÍ deja ganancia. Tramitarlo cuesta `BACHI_COSTO`
   ($5000) por alumna, así que los primeros $5000 ACUMULADOS de bachi de cada alumna son costo

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Grupo, MESES_FULL, DIA_COLORS, Recordatorio } from '@/lib/types'
 import { kvGet } from '@/lib/kv'
-import { mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, TIPOS_BACHI } from '@/lib/acumulacion'
+import { mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, TIPOS_BACHI, inicioCobro } from '@/lib/acumulacion'
 import { PaymentCalendar, sueldoDocente, SueldoCalculado } from '@/lib/nomina'
 import { useBackdropClose } from '@/lib/useBackdropClose'
 import {
@@ -89,7 +89,7 @@ export default function HoyPage() {
     const [{ data: gr }, { data: al }, { data: col }, { data: ba }, { data: movs }, { data: recs }, cals] =
       await Promise.all([
         supabase.from('grupos').select('*').eq('user_id', user.id).order('dia'),
-        supabase.from('alumnas').select('id,nombre,telefono,programa,cuota_mensual,pago_token,grupo_id')
+        supabase.from('alumnas').select('id,nombre,telefono,programa,cuota_mensual,pago_token,grupo_id,created_at')
           .eq('user_id', user.id).eq('status', 'activa').order('nombre'),
         supabase.from('pagos_colegiaturas').select('id,alumna_id,anio,mes,monto,estado').eq('user_id', user.id),
         supabase.from('pagos_bachillerato').select('id,alumna_id,anio,tipo,monto,estado').eq('user_id', user.id),
@@ -140,27 +140,37 @@ export default function HoyPage() {
     const bloques: GrupoDia[] = (gr ?? []).filter(g => g.dia === diaCode).map(g => {
       const conAdeudo: AlumnaDia[] = []
       let alCorriente = 0
+      const inicioGrupo = g.anio_inicio && g.mes_inicio ? { anio: g.anio_inicio, mes: g.mes_inicio } : null
       for (const a of (al ?? []).filter(x => x.grupo_id === g.id)) {
+        // Desde cuándo se le puede cobrar: inicio del grupo, o su alta si entró después.
+        const inicio = inicioCobro(inicioGrupo, a.created_at)
         const lim = a.programa === 'ambos' ? 1000 : (Number(a.cuota_mensual) || 1000)
         const meses: MesPend[] = []
         if (a.programa === 'colegiaturas' || a.programa === 'ambos') {
-          mesesAdeudadosCol((col ?? []).filter(p => p.alumna_id === a.id), lim, anioRef, mesRef)
+          mesesAdeudadosCol((col ?? []).filter(p => p.alumna_id === a.id), lim, anioRef, mesRef, inicio)
             .forEach(m => meses.push({ label: `${MESES_FULL[m.mes! - 1]} ${m.anio}`, falta: m.falta }))
         }
         if (a.programa === 'bachillerato' || a.programa === 'ambos') {
-          mesesAdeudadosBachi((ba ?? []).filter(p => p.alumna_id === a.id), 1000, anioRef, mesToBachiTipo(mesRef))
+          mesesAdeudadosBachi((ba ?? []).filter(p => p.alumna_id === a.id), 1000, anioRef, mesToBachiTipo(mesRef), inicio)
             .forEach(m => {
               const idx = TIPOS_BACHI.indexOf((m.tipo ?? 'ene') as typeof TIPOS_BACHI[number])
               meses.push({ label: `${MESES_FULL[idx]} ${m.anio} (bach.)`, falta: m.falta })
             })
         }
         if (meses.length === 0) { alCorriente++; continue }
+        // Atraso desde el arranque real: su registro más viejo o, si no tiene ninguno,
+        // el inicio del grupo.
         const propios = (col ?? []).filter(p => p.alumna_id === a.id)
-        let atrasoDias = 0
+        let arranque = inicio
         if (propios.length > 0) {
           const ini = propios.reduce((min, p) => (p.anio * 12 + p.mes) < (min.anio * 12 + min.mes) ? p : min)
-          atrasoDias = Math.max(0, Math.floor((hoyMs - Date.UTC(ini.anio, ini.mes - 1, 1)) / 86400000))
+          if (!arranque || (ini.anio * 12 + ini.mes) < (arranque.anio * 12 + arranque.mes)) {
+            arranque = { anio: ini.anio, mes: ini.mes }
+          }
         }
+        const atrasoDias = arranque
+          ? Math.max(0, Math.floor((hoyMs - Date.UTC(arranque.anio, arranque.mes - 1, 1)) / 86400000))
+          : 0
         conAdeudo.push({
           id: a.id, nombre: a.nombre, telefono: a.telefono, pago_token: a.pago_token,
           meses, total: meses.reduce((s, m) => s + m.falta, 0), atrasoDias,
