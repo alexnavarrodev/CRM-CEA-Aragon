@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Grupo, Alumna, PagoColegiatura, DIA_COLORS } from '@/lib/types'
 import { kvGet, kvSet } from '@/lib/kv'
-import { ChevronLeft, ChevronRight, Plus, Trash2, X, RefreshCw, Copy } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Trash2, X, RefreshCw, Copy, Printer } from 'lucide-react'
 import { useBackdropClose } from '@/lib/useBackdropClose'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -268,6 +268,14 @@ export default function CalendarioPage() {
                           style={{ background: cal.color }}>
                           {cal.nombre}
                         </span>
+                        <a
+                          href={`/carnet/${encodeURIComponent(cal.id)}`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="p-1 text-slate-300 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition"
+                          title="Imprimir hoja para el carnet"
+                        >
+                          <Printer className="w-3 h-3" />
+                        </a>
                         <button
                           onClick={() => openCopy(cal)}
                           className="p-1 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition"

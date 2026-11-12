@@ -2,10 +2,14 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Alumna, Grupo, AlumnaStatus, AlumnaPrograma, DIA_COLORS } from '@/lib/types'
-import { Plus, X, Users, Phone, Mail, Search, Link2, Check, AlertTriangle } from 'lucide-react'
+import { Alumna, Grupo, AlumnaStatus, AlumnaPrograma, DIA_COLORS, MESES_FULL } from '@/lib/types'
+import { Plus, X, Users, Phone, Mail, Search, Link2, Check, AlertTriangle, ArrowRightLeft } from 'lucide-react'
 import { EXTRA_TARGET, EXTRA_LABEL, estadoExtra, mesesTranscurridos } from '@/lib/extras'
 import { useBackdropClose } from '@/lib/useBackdropClose'
+import { kvGet, kvSet } from '@/lib/kv'
+import { hoyMX } from '@/lib/fecha'
+import { mesToBachiTipo } from '@/lib/acumulacion'
+import { mesesExentos, opcionesEmpiezaEn, TIPOS_BACHI_MES, type AnioMes } from '@/lib/cambio-grupo'
 
 type ExtrasAlumna = { uniforme: number; certificado: number; rcp: number }
 
@@ -28,6 +32,7 @@ export default function AlumnasPage() {
   const [statusFiltro, setStatusFiltro] = useState<AlumnaStatus | 'todos'>('activa')
   const [busqueda, setBusqueda] = useState('')
   const [modal, setModal] = useState<Alumna | null | 'new'>(null)
+  const [cambioGrupo, setCambioGrupo] = useState<Alumna | null>(null)
   const [loading, setLoading] = useState(true)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [extras, setExtras] = useState<Record<string, ExtrasAlumna>>({})
@@ -276,20 +281,191 @@ export default function AlumnasPage() {
           onSave={handleSave}
           onSaveExtras={handleSaveExtras}
           onBaja={modal !== 'new' ? handleBaja : undefined}
+          onCambiarGrupo={modal !== 'new' ? () => setCambioGrupo(modal) : undefined}
           onClose={() => setModal(null)}
+        />
+      )}
+
+      {cambioGrupo && (
+        <CambiarGrupoModal
+          alumna={cambioGrupo}
+          grupos={grupos}
+          onDone={() => { setCambioGrupo(null); setModal(null); setLoading(true); load() }}
+          onClose={() => setCambioGrupo(null)}
         />
       )}
     </div>
   )
 }
 
-function AlumnaModal({ alumna, grupos, extras, inicio, onSave, onSaveExtras, onBaja, onClose }: {
+function CambiarGrupoModal({ alumna, grupos, onDone, onClose }: {
+  alumna: Alumna; grupos: Grupo[]
+  onDone: () => void
+  onClose: () => void
+}) {
+  const supabase = createClient()
+  const backdrop = useBackdropClose(onClose)
+  const opciones = grupos.filter(g => g.id !== alumna.grupo_id)
+  const [nuevoId, setNuevoId] = useState('')
+  const [empieza, setEmpieza] = useState('')          // 'AAAA-M'
+  const [nCol, setNCol] = useState<number | null>(null)
+  const [nBachi, setNBachi] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const nuevo = opciones.find(g => g.id === nuevoId)
+  const inicio: AnioMes | null = nuevo?.anio_inicio && nuevo?.mes_inicio
+    ? { anio: nuevo.anio_inicio, mes: nuevo.mes_inicio } : null
+  const lista = inicio ? opcionesEmpiezaEn(inicio) : []
+  const empiezaEn: AnioMes | null = inicio
+    ? (empieza ? { anio: Number(empieza.split('-')[0]), mes: Number(empieza.split('-')[1]) } : inicio)
+    : null
+  const exentos = inicio && empiezaEn ? mesesExentos(inicio, empiezaEn) : []
+  const tieneCol = alumna.programa !== 'bachillerato'
+  const tieneBachi = alumna.programa !== 'colegiaturas'
+  const etiqueta = (m: AnioMes) => `${MESES_FULL[m.mes - 1]} ${m.anio}`
+
+  useEffect(() => {
+    ;(async () => {
+      const [{ count: c }, { count: b }] = await Promise.all([
+        supabase.from('pagos_colegiaturas').select('id', { count: 'exact', head: true }).eq('alumna_id', alumna.id),
+        supabase.from('pagos_bachillerato').select('id', { count: 'exact', head: true })
+          .eq('alumna_id', alumna.id).in('tipo', TIPOS_BACHI_MES),
+      ])
+      setNCol(c ?? 0); setNBachi(b ?? 0)
+    })()
+  }, [alumna.id])
+
+  const confirmar = async () => {
+    if (!nuevo) return
+    setSaving(true); setError('')
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Sesión expirada, vuelve a entrar.')
+
+      // 1) RESPALDO de lo que se va a borrar (si falla, no se toca nada)
+      const [{ data: viejasCol }, { data: viejasBachi }] = await Promise.all([
+        supabase.from('pagos_colegiaturas').select('*').eq('alumna_id', alumna.id),
+        supabase.from('pagos_bachillerato').select('*').eq('alumna_id', alumna.id).in('tipo', TIPOS_BACHI_MES),
+      ])
+      const previos = (await kvGet<unknown[]>(supabase, 'respaldo_cambios_grupo')) ?? []
+      await kvSet(supabase, 'respaldo_cambios_grupo', [...previos, {
+        fecha: hoyMX(), alumna_id: alumna.id, nombre: alumna.nombre,
+        de_grupo: alumna.grupo?.nombre ?? null, a_grupo: nuevo.nombre,
+        colegiaturas: viejasCol ?? [], bachillerato: viejasBachi ?? [],
+      }])
+      const verif = (await kvGet<unknown[]>(supabase, 'respaldo_cambios_grupo')) ?? []
+      if (verif.length !== previos.length + 1) throw new Error('No se pudo guardar el respaldo; no se cambió nada.')
+
+      // 2) Borrar la cuadrícula del grupo anterior (inscripción/materiales de bachillerato se conservan)
+      const d1 = await supabase.from('pagos_colegiaturas').delete().eq('alumna_id', alumna.id)
+      if (d1.error) throw d1.error
+      const d2 = await supabase.from('pagos_bachillerato').delete().eq('alumna_id', alumna.id).in('tipo', TIPOS_BACHI_MES)
+      if (d2.error) throw d2.error
+
+      // 3) Meses exentos: del arranque del grupo nuevo hasta que empieza a pagar
+      const NOTA = `Cambio de grupo ${alumna.grupo?.nombre ?? '(sin grupo)'} -> ${nuevo.nombre}. Meses exentos hasta que empieza a pagar.`
+      if (exentos.length > 0 && tieneCol) {
+        const { error: e } = await supabase.from('pagos_colegiaturas').insert(exentos.map(m => ({
+          user_id: user.id, alumna_id: alumna.id, anio: m.anio, mes: m.mes,
+          monto: 0, estado: 'pagado', fecha_pago: null, notas: NOTA,
+        })))
+        if (e) throw e
+      }
+      if (exentos.length > 0 && tieneBachi) {
+        const { error: e } = await supabase.from('pagos_bachillerato').insert(exentos.map(m => ({
+          user_id: user.id, alumna_id: alumna.id, anio: m.anio, tipo: mesToBachiTipo(m.mes),
+          monto: 0, estado: 'pagado', fecha_pago: null,
+        })))
+        if (e) throw e
+      }
+
+      // 4) Mover a la alumna y dejar constancia en sus notas
+      const linea = `[${hoyMX()}] Cambio de grupo: ${alumna.grupo?.nombre ?? 'sin grupo'} → ${nuevo.nombre}.`
+      const { error: e4 } = await supabase.from('alumnas').update({
+        grupo_id: nuevo.id,
+        notas: alumna.notas ? `${alumna.notas}\n${linea}` : linea,
+      }).eq('id', alumna.id)
+      if (e4) throw e4
+
+      onDone()
+    } catch (e) {
+      setError((e as { message?: string })?.message ?? 'Algo falló. Revisa la alumna antes de reintentar.')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm" {...backdrop}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <h3 className="font-semibold text-slate-900">Cambiar de grupo — {alumna.nombre}</h3>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-xl"><X className="w-4 h-4 text-slate-400" /></button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="text-sm text-slate-600">
+            Grupo actual: <b>{alumna.grupo?.nombre ?? 'Sin grupo'}</b>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Grupo nuevo</label>
+            <select value={nuevoId} onChange={e => { setNuevoId(e.target.value); setEmpieza('') }}
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+              <option value="">Elige un grupo…</option>
+              {opciones.map(g => <option key={g.id} value={g.id}>{g.nombre} ({g.dia})</option>)}
+            </select>
+          </div>
+
+          {nuevo && inicio && (
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">Empieza a pagar en</label>
+              <select value={empieza || `${inicio.anio}-${inicio.mes}`} onChange={e => setEmpieza(e.target.value)}
+                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                {lista.map(m => <option key={`${m.anio}-${m.mes}`} value={`${m.anio}-${m.mes}`}>{etiqueta(m)}</option>)}
+              </select>
+              <p className="text-[11px] text-slate-400 mt-1">
+                El grupo arranca en {etiqueta(inicio)}. Los meses anteriores a este quedan exentos ($0, no se le cobran).
+              </p>
+            </div>
+          )}
+          {nuevo && !inicio && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Este grupo no tiene fecha de inicio (se pone en Grupos). Se mueve sin meses exentos.
+            </p>
+          )}
+
+          {nuevo && (
+            <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 space-y-1.5">
+              <p className="font-semibold text-slate-700">Qué va a pasar</p>
+              <p>• Se borra su cuadrícula del grupo anterior: <b>{nCol ?? '…'}</b> mes(es) de colegiatura{tieneBachi ? <> y <b>{nBachi ?? '…'}</b> de bachillerato</> : null}. Antes se guarda un <b>respaldo</b>.</p>
+              {exentos.length > 0 && <p>• Quedan exentos: <b>{exentos.map(etiqueta).join(', ')}</b>.</p>}
+              {empiezaEn && <p>• Su primera colegiatura a cobrar es <b>{etiqueta(empiezaEn)}</b>.</p>}
+              <p>• Lo que ya pagó <b>no se toca</b>: sigue en Caja. Uniforme, certificado y RCP se conservan, pero sus plazos se cuentan desde el nuevo inicio.</p>
+            </div>
+          )}
+
+          {error && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
+
+          <div className="flex gap-3 pt-1">
+            <button onClick={onClose} disabled={saving} className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 transition">Cancelar</button>
+            <button onClick={confirmar} disabled={!nuevo || saving || nCol === null}
+              className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50">
+              {saving ? 'Cambiando…' : 'Cambiar de grupo'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AlumnaModal({ alumna, grupos, extras, inicio, onSave, onSaveExtras, onBaja, onCambiarGrupo, onClose }: {
   alumna: Alumna | null; grupos: Grupo[]
   extras: ExtrasAlumna
   inicio?: { anio: number; mes: number }
   onSave: (d: Partial<Alumna>) => void
   onSaveExtras: (alumnaId: string, vals: ExtrasAlumna) => void
   onBaja?: (a: Alumna) => void
+  onCambiarGrupo?: () => void
   onClose: () => void
 }) {
   const [uniforme, setUniforme] = useState(String(extras.uniforme ?? 0))
@@ -363,11 +539,23 @@ function AlumnaModal({ alumna, grupos, extras, inicio, onSave, onSaveExtras, onB
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Grupo</label>
-              <select value={grupoId} onChange={e => setGrupoId(e.target.value)}
-                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                <option value="">Sin grupo</option>
-                {grupos.map(g => <option key={g.id} value={g.id}>{g.nombre} ({g.dia})</option>)}
-              </select>
+              {alumna?.grupo_id && onCambiarGrupo ? (
+                <div className="flex items-center gap-2">
+                  <span className="flex-1 px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-slate-50 text-slate-700 truncate">
+                    {alumna.grupo?.nombre ?? 'Grupo'}
+                  </span>
+                  <button type="button" onClick={onCambiarGrupo} title="Cambiar de grupo con sus pagos"
+                    className="flex items-center gap-1.5 px-3 py-2.5 border border-blue-200 text-blue-600 rounded-xl text-sm font-medium hover:bg-blue-50 transition whitespace-nowrap">
+                    <ArrowRightLeft className="w-4 h-4" /> Cambiar
+                  </button>
+                </div>
+              ) : (
+                <select value={grupoId} onChange={e => setGrupoId(e.target.value)}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                  <option value="">Sin grupo</option>
+                  {grupos.map(g => <option key={g.id} value={g.id}>{g.nombre} ({g.dia})</option>)}
+                </select>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Programa</label>

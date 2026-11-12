@@ -283,8 +283,9 @@ export default function CajaPage() {
   }
 
   const mesesOpciones = Array.from({ length: 12 }, (_, i) => {
-    const d = new Date()
-    d.setMonth(d.getMonth() - i)
+    // Día 1 fijo: con setMonth sobre "hoy", un día 31 desborda los meses cortos (31 sep → 1 oct)
+    const hoy = new Date()
+    const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1)
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
     const label = d.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })
     return { key, label }
