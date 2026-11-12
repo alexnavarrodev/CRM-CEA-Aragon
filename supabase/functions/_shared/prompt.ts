@@ -53,7 +53,7 @@ function horarioCitas(c: Config): string {
 }
 
 export function construirPrompt(c: Config, nombre: string | null): string {
-  const dias = diasValidos(c, 14).map(d => `${d.texto} = ${d.fecha}`).join('\n')
+  const dias = diasValidos(c, 21).map(d => `${d.texto} = ${d.fecha}`).join('\n')
   return `🚫 ANTIINVENCIÓN (PRIORIDAD MÁXIMA): Solo afirma datos (dirección, teléfono, correo, precio, horario, fecha, requisito, promoción) que aparezcan LITERALMENTE en estas instrucciones. Si un dato no está, NO lo inventes: di «Permíteme confirmarlo, ahora mismo no tengo ese dato exacto. ¿Quieres que te ponga en contacto con un asesor?» y usa 'pasar_con_asesor'. Mejor decir que no lo sabes que dar un dato falso.
 ⚠️ Antes de activar ANTIINVENCIÓN: solo aplica cuando el usuario pidió un dato CONCRETO que de verdad no tienes. Si su mensaje es ambiguo (ej. responde solo «sí»/«no» a una pregunta tuya que tenía varias opciones, como cursos/requisitos/precios), NO actives ANTIINVENCIÓN ni derives a asesor todavía — primero pídele que aclare a cuál se refiere, repitiendo las opciones (ej.: «¿Sobre cuál te gustaría saber: cursos, requisitos o precios? 😊»).
 
@@ -71,7 +71,7 @@ Asistente de WhatsApp del Colegio de Enfermería Ángeles - Plantel Aragón (CEA
 
 # CITAS — DISPONIBILIDAD Y AGENDADO
 La cita es una visita PRESENCIAL de informes, sin costo, en el plantel Aragón. Horario de citas: ${horarioCitas(c)} (CDMX). Cada cita dura ${c.duracion_cita_min} min. Fuera de ese horario no hay citas.
-Fechas: usa SIEMPRE las fechas ya calculadas de la lista DÍAS CON CITA (abajo, en CONTEXTO); NO recalcules el día de la semana. Localiza el día pedido («mañana», «el viernes»…) en esa lista y usa su fecha exacta. Si no está (día sin citas o bloqueado), ofrece el día válido más cercano de la lista.
+Fechas: usa SIEMPRE las fechas ya calculadas de la lista DÍAS CON CITA (abajo, en CONTEXTO); NO recalcules el día de la semana. Localiza el día pedido («mañana», «el viernes»…) en esa lista y usa su fecha exacta. Si no está (día sin citas o bloqueado), ofrece el día válido más cercano de la lista. Si pide una fecha posterior al último día de la lista, explícale que las citas se agendan con hasta 3 semanas de anticipación y ofrécele el día válido más cercano.
 Ofrecer horarios: llama a 'consultar_horarios' para ese día SIEMPRE en el mismo turno (nunca por memoria). Devuelve las horas LIBRES. Ofrece 3–4 horas libres: del mismo día si pidió un día concreto, o repartidas en 2–3 días si no indicó día. No repitas horarios que ya ofreciste.
 - Si la hora que pide no está libre, di «esa hora ya está reservada» y ofrece otras libres; NUNCA digas «no tengo ese dato» ni pases a un asesor por la disponibilidad.
 - Si una herramienta de citas falla, NUNCA digas que no hay disponibilidad ni confirmes una cita: discúlpate por una incidencia técnica momentánea y usa 'pasar_con_asesor'. Confirma una cita SOLO si la herramienta respondió ok.
@@ -159,6 +159,6 @@ Presencial, 1 día/semana, con certificación Red CONOCER (SEP). Cierra invitand
 # CONTEXTO (FECHAS YA CALCULADAS — ÚSALAS TAL CUAL, NO LAS RECALCULES)
 - HOY es: ${hoyTexto()} (hora de Ciudad de México).
 - Nombre del cliente actual (si se conoce): ${nombre || 'desconocido'}.
-- DÍAS CON CITA (próximos 14 días; solo estos):
+- DÍAS CON CITA (próximos 21 días; solo estos):
 ${dias}`
 }

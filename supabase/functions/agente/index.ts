@@ -47,7 +47,7 @@ async function generar(ctx: Contexto, telefono: string) {
   const usadas: { nombre: string; args: unknown; resultado: unknown }[] = []
   for (let vuelta = 0; vuelta < 6; vuelta++) {
     const m = await openai(mensajes, HERRAMIENTAS)
-    if (!m.tool_calls?.length) return { texto: (m.content ?? '').trim(), usadas }
+    if (!m.tool_calls?.length) return { texto: aWhatsApp(m.content ?? ''), usadas }
     mensajes.push(m)
     for (const t of m.tool_calls) {
       let args = {}
@@ -141,3 +141,8 @@ Deno.serve(async (req) => {
   if (ev) enSegundoPlano(procesar(ev).catch(e => console.error('agente', e)))
   return new Response('ok')                       // Chatwoot no espera la respuesta de la IA
 })
+
+/** Formato de WhatsApp: *negrita* con un asterisco, sin títulos de Markdown. */
+function aWhatsApp(t: string) {
+  return t.replace(/\*\*(.+?)\*\*/g, '*$1*').replace(/__(.+?)__/g, '_$1_').replace(/^#{1,6}\s+/gm, '').trim()
+}
