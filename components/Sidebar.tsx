@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import {
   LayoutDashboard, CreditCard, GraduationCap, Wallet,
   UserPlus, Users, UserCheck, UsersRound, BarChart2, Settings, LogOut, Search, Mic,
-  ArrowRightLeft, CalendarDays, MessageCircle, ClipboardCheck, ClipboardList, Sun,
+  ArrowRightLeft, CalendarDays, MessageCircle, ClipboardCheck, ClipboardList, Sun, CalendarCheck, Bot, Megaphone,
 } from 'lucide-react'
 
 const nav = [
@@ -14,6 +14,7 @@ const nav = [
     section: 'OPERACIÓN',
     items: [
       { href: '/hoy',             label: 'Mi día',         icon: Sun },
+      { href: '/citas',           label: 'Citas',          icon: CalendarCheck },
       { href: '/dashboard',       label: 'Panel',          icon: LayoutDashboard },
       { href: '/colegiaturas',    label: 'Colegiaturas',   icon: CreditCard },
       { href: '/bachillerato',    label: 'Bachillerato',   icon: GraduationCap },
@@ -29,6 +30,7 @@ const nav = [
   {
     section: 'PERSONAS',
     items: [
+      { href: '/leads',      label: 'Leads WhatsApp', icon: Megaphone },
       { href: '/prospectos', label: 'Prospectos', icon: UserPlus },
       { href: '/alumnas',    label: 'Alumnas',    icon: Users },
       { href: '/grupos',     label: 'Grupos',     icon: UsersRound },
@@ -38,6 +40,7 @@ const nav = [
   {
     section: 'MÁS',
     items: [
+      { href: '/agente',   label: 'Agente WhatsApp', icon: Bot },
       { href: '/reportes', label: 'Reportes', icon: BarChart2 },
       { href: '/ajustes',  label: 'Ajustes',  icon: Settings },
     ],
@@ -131,7 +134,7 @@ export default function Sidebar({ userEmail, userName, onClose }: SidebarProps) 
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-white text-sm font-medium truncate">{displayName}</p>
-            <p className="text-white/35 text-xs">Directora</p>
+            <p className="text-white/35 text-xs">Director</p>
           </div>
           <button
             onClick={handleLogout}

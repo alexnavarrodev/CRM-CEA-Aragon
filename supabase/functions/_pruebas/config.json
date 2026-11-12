@@ -1,0 +1,52 @@
+{
+ "precios": {
+  "curso_rcp": 1200,
+  "uniformes": 1500,
+  "certificado": 8000,
+  "inscripcion": 500,
+  "curso_heridas": 1200,
+  "colegiatura_auxiliar": 1000,
+  "colegiatura_auxiliar_bachillerato": 2000
+ },
+ "promocion": {
+  "fin": "2026-12-05",
+  "texto": "50% de descuento en la inscripción ($250 en lugar de $500) y un oxímetro de regalo",
+  "activa": true,
+  "nombre": "Buen Fin"
+ },
+ "horario_citas": {
+  "jueves": [
+   "09:00",
+   "14:00"
+  ],
+  "martes": [
+   "09:00",
+   "14:00"
+  ],
+  "sabado": [
+   "09:00",
+   "18:00"
+  ],
+  "viernes": [
+   "09:00",
+   "14:00"
+  ],
+  "miercoles": [
+   "09:00",
+   "14:00"
+  ]
+ },
+ "tolerancia_min": 15,
+ "dias_bloqueados": [],
+ "grupo_principal": {
+  "inicio": "2026-11-28",
+  "nombre": "Sábado Matutino",
+  "horario": "9:00–14:00"
+ },
+ "duracion_cita_min": 30,
+ "grupo_alternativo": {
+  "inicio": null,
+  "nombre": "Jueves Matutino",
+  "horario": "9:00–14:00"
+ }
+}

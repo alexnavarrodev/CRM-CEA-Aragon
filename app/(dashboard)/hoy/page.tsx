@@ -2,15 +2,15 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Grupo, MESES_FULL, DIA_COLORS, Recordatorio } from '@/lib/types'
+import { Grupo, DIA_COLORS, Recordatorio } from '@/lib/types'
 import { kvGet } from '@/lib/kv'
-import { mesesAdeudadosCol, mesesAdeudadosBachi, mesToBachiTipo, TIPOS_BACHI, inicioCobro } from '@/lib/acumulacion'
 import type { PaymentCalendar, SueldoCalculado } from '@/lib/nomina'
 import { sueldoDocente } from '@/lib/nomina'
 import { useBackdropClose } from '@/lib/useBackdropClose'
+import Link from 'next/link'
 import {
-  MessageCircle, Link2, Check, Phone, Banknote, ClipboardCopy, Plus, X,
-  ChevronLeft, ChevronRight, CalendarDays, Coffee, Wallet, Bell, AlertTriangle, Trash2,
+  Check, Banknote, ClipboardCopy, Plus, X,
+  ChevronLeft, ChevronRight, CalendarDays, Coffee, Wallet, Bell, AlertTriangle, Trash2, CalendarCheck, MessageCircle,
 } from 'lucide-react'
 
 const fmt = (n: number) => `$${Math.round(n).toLocaleString('es-MX')}`
@@ -34,21 +34,14 @@ function conceptoEsDe(concepto: string, nombre: string): boolean {
   return c.includes(pila) || (pila.length > 4 && c.includes(pila.slice(0, -1)))
 }
 
-function waPhone(tel: string | null): string | null {
-  if (!tel) return null
-  let d = tel.replace(/\D/g, '')
-  if (d.length === 10) d = '52' + d
-  if (d.length === 11 && d.startsWith('1')) d = '52' + d.slice(1)
-  if (d.length === 13 && d.startsWith('521')) d = '52' + d.slice(3)
-  return d.length === 12 && d.startsWith('52') ? d : (d.length >= 10 ? d : null)
+interface GrupoDia { grupo: Grupo; alumnas: number }
+// Citas de visita al plantel del agente de WhatsApp (ver página Citas)
+interface CitaDia { id: string; inicio: string; estado: string; modalidad: string | null; leads: { nombre: string | null; telefono: string } }
+const CITA_ESTADO: Record<string, [string, string]> = {
+  agendada: ['Sin confirmar', 'bg-amber-50 text-amber-700'], confirmada: ['Confirmada', 'bg-blue-50 text-blue-700'],
+  llego: ['Llegó', 'bg-emerald-50 text-emerald-700'], no_llego: ['No llegó', 'bg-red-50 text-red-600'],
 }
-
-interface MesPend { label: string; falta: number }
-interface AlumnaDia {
-  id: string; nombre: string; telefono: string | null; pago_token: string | null
-  meses: MesPend[]; total: number; atrasoDias: number
-}
-interface GrupoDia { grupo: Grupo; conAdeudo: AlumnaDia[]; alCorriente: number; totalPorCobrar: number }
+const horaCita = (iso: string) => new Date(iso).toLocaleTimeString('es-MX', { timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit' })
 interface PagoNomina {
   grupo: Grupo; docente: string; sueldo: SueldoCalculado
   pagadoHoy: boolean; montoPagadoHoy: number
@@ -64,9 +57,9 @@ export default function HoyPage() {
   const [nomina, setNomina] = useState<PagoNomina[]>([])
   const [fijos, setFijos] = useState<PagoFijo[]>([])
   const [recordatorios, setRecordatorios] = useState<Recordatorio[]>([])
+  const [citasDia, setCitasDia] = useState<CitaDia[]>([])
   const [alumnasTodas, setAlumnasTodas] = useState<{ id: string; nombre: string }[]>([])
   const [loading, setLoading] = useState(true)
-  const [copiedId, setCopiedId] = useState<string | null>(null)
   const [copiadoGuion, setCopiadoGuion] = useState(false)
   const [modalRec, setModalRec] = useState<{ alumnaId: string | null } | null>(null)
   const supabase = createClient()
@@ -87,20 +80,23 @@ export default function HoyPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    const [{ data: gr }, { data: al }, { data: col }, { data: ba }, { data: movs }, { data: recs }, cals] =
+    const manana = new Date(new Date(fechaStr + 'T12:00:00Z').getTime() + 86400000).toISOString().slice(0, 10)
+    const [{ data: gr }, { data: al }, { data: movs }, { data: recs }, cals, { data: cts }] =
       await Promise.all([
         supabase.from('grupos').select('*').eq('user_id', user.id).order('dia'),
-        supabase.from('alumnas').select('id,nombre,telefono,programa,cuota_mensual,pago_token,grupo_id,created_at')
+        supabase.from('alumnas').select('id,nombre,grupo_id')
           .eq('user_id', user.id).eq('status', 'activa').order('nombre'),
-        supabase.from('pagos_colegiaturas').select('id,alumna_id,anio,mes,monto,estado').eq('user_id', user.id),
-        supabase.from('pagos_bachillerato').select('id,alumna_id,anio,tipo,monto,estado').eq('user_id', user.id),
         supabase.from('movimientos_caja').select('fecha,concepto,monto')
           .eq('user_id', user.id).eq('tipo', 'egreso').eq('categoria', 'sueldos')
           .order('fecha', { ascending: false }).limit(200),
         supabase.from('recordatorios').select('*, alumna:alumnas(nombre)')
           .eq('user_id', user.id).order('fecha'),
         kvGet<PaymentCalendar[]>(supabase, CAL_KEY),
+        supabase.from('citas').select('id, inicio, estado, modalidad, leads!inner(nombre, telefono)')
+          .gte('inicio', `${fechaStr}T00:00:00-06:00`).lt('inicio', `${manana}T00:00:00-06:00`)
+          .in('estado', ['agendada', 'confirmada', 'llego', 'no_llego']).order('inicio'),
       ])
+    setCitasDia((cts ?? []) as unknown as CitaDia[])
 
     setAlumnasTodas((al ?? []).map(a => ({ id: a.id, nombre: a.nombre })))
     setRecordatorios((recs ?? []) as Recordatorio[])
@@ -137,49 +133,10 @@ export default function HoyPage() {
       }
     })
 
-    // ── Grupos con clase este día y su cobranza ───────────────────────────
-    const bloques: GrupoDia[] = (gr ?? []).filter(g => g.dia === diaCode).map(g => {
-      const conAdeudo: AlumnaDia[] = []
-      let alCorriente = 0
-      const inicioGrupo = g.anio_inicio && g.mes_inicio ? { anio: g.anio_inicio, mes: g.mes_inicio } : null
-      for (const a of (al ?? []).filter(x => x.grupo_id === g.id)) {
-        // Desde cuándo se le puede cobrar: inicio del grupo, o su alta si entró después.
-        const inicio = inicioCobro(inicioGrupo, a.created_at)
-        const lim = a.programa === 'ambos' ? 1000 : (Number(a.cuota_mensual) || 1000)
-        const meses: MesPend[] = []
-        if (a.programa === 'colegiaturas' || a.programa === 'ambos') {
-          mesesAdeudadosCol((col ?? []).filter(p => p.alumna_id === a.id), lim, anioRef, mesRef, inicio)
-            .forEach(m => meses.push({ label: `${MESES_FULL[m.mes! - 1]} ${m.anio}`, falta: m.falta }))
-        }
-        if (a.programa === 'bachillerato' || a.programa === 'ambos') {
-          mesesAdeudadosBachi((ba ?? []).filter(p => p.alumna_id === a.id), 1000, anioRef, mesToBachiTipo(mesRef), inicio)
-            .forEach(m => {
-              const idx = TIPOS_BACHI.indexOf((m.tipo ?? 'ene') as typeof TIPOS_BACHI[number])
-              meses.push({ label: `${MESES_FULL[idx]} ${m.anio} (bach.)`, falta: m.falta })
-            })
-        }
-        if (meses.length === 0) { alCorriente++; continue }
-        // Atraso desde el arranque real: su registro más viejo o, si no tiene ninguno,
-        // el inicio del grupo.
-        const propios = (col ?? []).filter(p => p.alumna_id === a.id)
-        let arranque = inicio
-        if (propios.length > 0) {
-          const ini = propios.reduce((min, p) => (p.anio * 12 + p.mes) < (min.anio * 12 + min.mes) ? p : min)
-          if (!arranque || (ini.anio * 12 + ini.mes) < (arranque.anio * 12 + arranque.mes)) {
-            arranque = { anio: ini.anio, mes: ini.mes }
-          }
-        }
-        const atrasoDias = arranque
-          ? Math.max(0, Math.floor((hoyMs - Date.UTC(arranque.anio, arranque.mes - 1, 1)) / 86400000))
-          : 0
-        conAdeudo.push({
-          id: a.id, nombre: a.nombre, telefono: a.telefono, pago_token: a.pago_token,
-          meses, total: meses.reduce((s, m) => s + m.falta, 0), atrasoDias,
-        })
-      }
-      conAdeudo.sort((x, y) => (y.atrasoDias - x.atrasoDias) || (y.total - x.total))
-      return { grupo: g, conAdeudo, alCorriente, totalPorCobrar: conAdeudo.reduce((s, d) => s + d.total, 0) }
-    })
+    // ── Grupos con clase este día ─────────────────────────────────────────
+    const bloques: GrupoDia[] = (gr ?? []).filter(g => g.dia === diaCode).map(g => ({
+      grupo: g, alumnas: cuentaAlumnas(g.id),
+    }))
 
     setNomina(listaNomina)
     setFijos(listaFijos)
@@ -220,29 +177,17 @@ export default function HoyPage() {
     return null
   }
 
-  const enlace = (token: string | null) => `${window.location.origin}/pagar/${token}`
-
-  const copiar = (d: AlumnaDia) => {
-    if (!d.pago_token) return
-    navigator.clipboard.writeText(enlace(d.pago_token)).then(() => {
-      setCopiedId(d.id); setTimeout(() => setCopiedId(null), 1600)
-    })
-  }
-
-  const whatsapp = (d: AlumnaDia) => {
-    const phone = waPhone(d.telefono)
-    const detalle = d.meses.length ? ` de ${d.meses.map(m => m.label).join(', ')}` : ''
-    const msg = `Hola ${d.nombre}\n\nTe recordamos tu pago pendiente${detalle}.\n\nPuedes pagar en línea (Transferencia o tarjeta) aquí:\n${enlace(d.pago_token)}\n\n¡Gracias! — CEA Aragón`
-    window.open(`${phone ? `https://wa.me/${phone}` : 'https://wa.me/'}?text=${encodeURIComponent(msg)}`, '_blank')
-  }
-
-  const totalDia = gruposDia.reduce((s, b) => s + b.totalPorCobrar, 0)
   const totalNomina = nomina.filter(p => !p.pagadoHoy).reduce((s, p) => s + p.sueldo.monto, 0)
     + fijos.filter(p => !p.pagadoHoy).reduce((s, p) => s + p.monto, 0)
   const pendientesRec = [...recsAtrasados, ...recsDelDia.filter(r => !r.hecho)].length
 
   const copiarGuion = () => {
     const L: string[] = [`GUION — ${fechaLabel}`, '']
+    if (citasDia.length) {
+      L.push('CITAS:')
+      citasDia.forEach(c => L.push(`  ${horaCita(c.inicio)} ${c.leads.nombre || c.leads.telefono} — ${c.modalidad || '-'} (${CITA_ESTADO[c.estado]?.[0] ?? c.estado})`))
+      L.push('')
+    }
     if (recsAtrasados.length || recsDelDia.length) {
       L.push('RECORDATORIOS:')
       recsAtrasados.forEach(r => L.push(`  [ ] (ATRASADO ${r.fecha}) ${r.alumna?.nombre ? r.alumna.nombre + ' — ' : ''}${r.titulo}`))
@@ -258,10 +203,7 @@ export default function HoyPage() {
       L.push('')
     }
     gruposDia.forEach(b => {
-      L.push(`GRUPO ${b.grupo.nombre}${b.grupo.horario ? ` (${b.grupo.horario})` : ''} — ${fmt(b.totalPorCobrar)} por cobrar`)
-      if (!b.conAdeudo.length) L.push('  Todas al corriente.')
-      b.conAdeudo.forEach(d => L.push(
-        `  [ ] ${d.nombre} — ${fmt(d.total)}: ${d.meses.map(m => m.label).join(', ')}${d.atrasoDias ? ` (${d.atrasoDias} días de atraso)` : ''}`))
+      L.push(`GRUPO ${b.grupo.nombre}${b.grupo.horario ? ` (${b.grupo.horario})` : ''} — ${b.alumnas} alumnas`)
       L.push('')
     })
     navigator.clipboard.writeText(L.join('\n')).then(() => {
@@ -340,14 +282,10 @@ export default function HoyPage() {
         </div>
 
         {!loading && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mt-3">
+          <div className="grid grid-cols-3 gap-2 md:gap-3 mt-3">
             <div className="bg-violet-50 rounded-xl p-2.5 border border-violet-100">
               <p className="text-[10px] md:text-xs text-violet-600 font-medium">Recordatorios</p>
               <p className="text-base md:text-xl font-bold text-violet-700">{pendientesRec}</p>
-            </div>
-            <div className="bg-amber-50 rounded-xl p-2.5 border border-amber-100">
-              <p className="text-[10px] md:text-xs text-amber-600 font-medium">Por cobrar</p>
-              <p className="text-base md:text-xl font-bold text-amber-700 truncate">{fmt(totalDia)}</p>
             </div>
             <div className="bg-blue-50 rounded-xl p-2.5 border border-blue-100">
               <p className="text-[10px] md:text-xs text-blue-600 font-medium">Sueldos hoy</p>
@@ -366,6 +304,32 @@ export default function HoyPage() {
           <div className="text-center py-16 text-slate-400">Cargando…</div>
         ) : (
           <>
+            {/* ── Citas del día ───────────────────────────────────────── */}
+            {citasDia.length > 0 && (
+              <section>
+                <h2 className="flex items-center gap-2 text-sm font-bold text-slate-700 uppercase tracking-wide mb-2">
+                  <CalendarCheck className="w-4 h-4 text-emerald-500" /> Citas ({citasDia.length})
+                  <Link href="/citas" className="ml-auto text-xs font-medium normal-case text-blue-600 hover:underline">Marcar llegadas →</Link>
+                </h2>
+                <div className="space-y-2">
+                  {citasDia.map(c => (
+                    <div key={c.id} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white shadow-sm p-3.5">
+                      <span className="text-sm font-bold text-slate-900 w-12">{horaCita(c.inicio)}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-slate-800 truncate">{c.leads.nombre || 'Sin nombre'}</p>
+                        <p className="text-xs text-slate-500 truncate">{c.modalidad || 'Modalidad sin indicar'}</p>
+                      </div>
+                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${CITA_ESTADO[c.estado]?.[1] ?? 'bg-slate-100 text-slate-500'}`}>
+                        {CITA_ESTADO[c.estado]?.[0] ?? c.estado}
+                      </span>
+                      <a href={`https://wa.me/${c.leads.telefono}`} target="_blank" rel="noreferrer" title="Escribir por WhatsApp"
+                        className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50"><MessageCircle className="w-4 h-4" /></a>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             {/* ── Recordatorios ───────────────────────────────────────── */}
             {(recsAtrasados.length > 0 || recsDelDia.length > 0) && (
               <section>
@@ -460,78 +424,9 @@ export default function HoyPage() {
                     )}
                     {b.grupo.maestra && <span className="text-xs text-slate-400">· {b.grupo.maestra}</span>}
                     <div className="flex-1 border-t border-slate-100 min-w-4" />
-                    <span className="text-xs font-semibold text-amber-700">{fmt(b.totalPorCobrar)} por cobrar</span>
+                    <span className="text-xs text-slate-400">{b.alumnas} alumnas</span>
                   </div>
 
-                  {b.conAdeudo.length === 0 ? (
-                    <div className="bg-emerald-50/60 border border-emerald-200 rounded-2xl p-4 text-center">
-                      <Check className="w-6 h-6 text-emerald-400 mx-auto mb-1" />
-                      <p className="text-emerald-800 text-sm font-medium">Todo el grupo al corriente 🎉</p>
-                      <p className="text-emerald-600/70 text-xs">{b.alCorriente} alumnas, nada que cobrar.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2.5">
-                      {b.conAdeudo.map(d => {
-                        const phone = waPhone(d.telefono)
-                        return (
-                          <div key={d.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <p className="font-semibold text-slate-800">{d.nombre}</p>
-                                  {d.atrasoDias > 0 && (
-                                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                                      d.atrasoDias >= 60 ? 'bg-red-100 text-red-700' :
-                                      d.atrasoDias >= 30 ? 'bg-amber-100 text-amber-700' :
-                                      'bg-slate-100 text-slate-600'
-                                    }`}>
-                                      {d.atrasoDias} días de atraso
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="flex flex-wrap gap-1 mt-2">
-                                  {d.meses.map((m, i) => (
-                                    <span key={i} className="text-[11px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
-                                      {m.label} · {fmt(m.falta)}
-                                    </span>
-                                  ))}
-                                </div>
-                                {d.telefono && (
-                                  <p className="text-xs text-slate-400 flex items-center gap-1 mt-2">
-                                    <Phone className="w-3 h-3" />{d.telefono}
-                                  </p>
-                                )}
-                              </div>
-                              <p className="text-lg font-bold text-slate-800 flex-shrink-0">{fmt(d.total)}</p>
-                            </div>
-                            <div className="flex gap-2 mt-3">
-                              <button onClick={() => whatsapp(d)} disabled={!d.pago_token}
-                                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium transition active:scale-95 disabled:opacity-40"
-                                title={phone ? 'Abrir WhatsApp con el recordatorio' : 'Sin teléfono: se abrirá WhatsApp para elegir contacto'}>
-                                <MessageCircle className="w-4 h-4" /> Recordar por WhatsApp
-                              </button>
-                              <button onClick={() => setModalRec({ alumnaId: d.id })}
-                                className="px-3 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium transition active:scale-95"
-                                title="Apuntar un tema para hablar con ella">
-                                <Bell className="w-4 h-4" />
-                              </button>
-                              <button onClick={() => copiar(d)} disabled={!d.pago_token}
-                                className={`px-3 py-2.5 rounded-xl border text-sm font-medium transition active:scale-95 disabled:opacity-40 ${
-                                  copiedId === d.id ? 'border-emerald-300 text-emerald-600 bg-emerald-50' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                                }`} title="Copiar enlace de pago">
-                                {copiedId === d.id ? <Check className="w-4 h-4" /> : <Link2 className="w-4 h-4" />}
-                              </button>
-                            </div>
-                          </div>
-                        )
-                      })}
-                      {b.alCorriente > 0 && (
-                        <p className="text-xs text-slate-400 text-center pt-1">
-                          + {b.alCorriente} {b.alCorriente === 1 ? 'alumna al corriente' : 'alumnas al corriente'}
-                        </p>
-                      )}
-                    </div>
-                  )}
                 </section>
               )
             })}

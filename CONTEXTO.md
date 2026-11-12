@@ -70,9 +70,10 @@ netlify deploy --build --prod
      **exacto**, ver `lib/nomina.ts`. Además los fijos de sábado (Alex $3,000 / Isela $1,500).
      Se marcan como pagados **solos** al registrar el egreso en Caja con categoría `sueldos`
      (match por nombre de pila, tolera "Isela"/"Isella"); sin doble captura.
-  3. **Grupos con clase ese día** (`grupos.dia`) con las alumnas que deben colegiatura /
-     bachillerato, meses y montos faltantes, días de atraso, botón WhatsApp + enlace de pago
-     (reusa la lógica de `por-cobrar`). Las que están al corriente solo se cuentan.
+  3. **Grupos con clase ese día** (`grupos.dia`): solo nombre, horario, maestra y nº de alumnas.
+     **15 oct 2026, a petición de Alex: se QUITÓ de aquí la cobranza** (tarjetas de alumnas que
+     deben, botón WhatsApp/enlace de pago, cuadro "Por cobrar" y las líneas de cobro de
+     "Copiar guion"). Esa gestión vive solo en `por-cobrar/`. No volver a ponerla aquí sin pedirlo.
   Incluye navegación ◀▶ por día (para preparar el día siguiente) y **"Copiar guion"** que
   vuelca todo como texto plano.
 - `dashboard/` (Panel, client) — KPIs por mes con filtro ◀▶; **Margen** (bachillerato sólo
@@ -86,9 +87,28 @@ netlify deploy --build --prod
   (vencidos primero); botón "Recordar por WhatsApp" (wa.me) + copiar enlace.
 - `transferencias/` — wallet de control interno (app_kv key `wallet_entries`, vía lib/kv.ts).
 - `calendario/` — fechas de pago por grupo (app_kv key `payment_calendars_v2`) + resumen mensual.
+  Icono 🖨 en cada calendario → **`app/carnet/[id]`** (23 oct 2026): **reverso del carnet** con el mismo
+  formato del carnet impreso de Alex: hoja carta, 4 cuartos de 10.5 × 14 cm = 2 carnets por hoja. En cada carnet,
+  cuarto IZQUIERDO = colegiaturas del grupo con fecha y concepto impresos (marca liquidar certificado);
+  cuarto DERECHO = "Control de pagos" en blanco para anotar libre (uniformes, certificado, cursos).
+  Se imprime detrás de la hoja de portada/reglamento (que Alex ya tiene), volteando por el lado largo:
+  así el cuarto izquierdo cae detrás de la portada = primera página al abrir. Carta, márgenes ninguno, 100%.
+  Fuera de `(dashboard)` para que no salga el menú al imprimir.
+  Se añadió el calendario `cal-jma` (JMA, inicio 15/10/2026) — **aún NO enlazado** a `grupos.calendario_id`
+  del grupo JMA (enlazarlo activa recargos y sueldo de la docente para ese grupo).
 - `voz/` — captura por voz → `/api/voice` (OpenAI) → movimiento de caja.
 - `alumnas/` — alta/edición; **botón copiar enlace de pago**; sección RCP/Uniforme/Certificado
   (barras + ajuste manual + alerta vencido).
+  **Cambiar de grupo (2 oct 2026):** en el modal de una alumna con grupo, el campo Grupo ya no
+  es un select libre sino el nombre + botón «Cambiar» → `CambiarGrupoModal`. Hace lo mismo que
+  se hizo a mano con Rocío Chora: (1) respaldo de sus colegiaturas/bachi-mensuales en `app_kv`
+  clave `respaldo_cambios_grupo`; (2) borra esa cuadrícula (la inscripción/materiales de
+  bachillerato NO se tocan); (3) marca $0/pagado los meses desde el arranque del grupo nuevo
+  hasta el mes elegido en «Empieza a pagar en» (lógica pura en `lib/cambio-grupo.ts`);
+  (4) cambia `grupo_id` y anota la línea en `notas`. Lo pagado en Caja y los extras
+  (uniforme/cert/RCP) se conservan; sus plazos se cuentan desde el nuevo inicio. Cambiar el
+  select a mano ya no es posible para quien tiene grupo, porque movía el grupo sin tocar pagos.
+  Probado a nivel de BD con una alumna de prueba (borrada); la UI no se ha probado logueada.
 - `pagos-extra/` (16 jul 2026) — vista de tabla con TODAS las alumnas y sus 3 conceptos extra
   (RCP $1,200 / Uniforme $1,500 / Certificado $7,000): botón "Falta $X" o "✓ Liquidado" por
   columna, clic para ajustar el monto inline; la fila se pone verde cuando las 3 están
@@ -106,6 +126,17 @@ netlify deploy --build --prod
   algo falla, con estado "Guardando…" mientras espera.
   **Pendiente portar a Atenea** (aún no se ha copiado, y ahí tampoco se ha corrido el SQL).
 - `prospectos/`, `grupos/`, `egresadas/`, `reportes/`, `ajustes/`.
+- **Agente de WhatsApp dentro del CRM (nov 2026, en construcción; ver `../PLAN-MIGRACION-CITAS-CRM.md`).**
+  Sustituirá al agente de n8n. Código de las funciones en `supabase/functions/` (Deno, se revisa con
+  `deno check --config supabase/functions/deno.json …`; `tsconfig.json` excluye `supabase/`):
+  `agente` (webhook de Chatwoot; modo `sombra` = no responde, guarda en `agente_sombra` lo que habría dicho),
+  `entrada-twilio` (guarda el anuncio de origen y reenvía a Chatwoot) y `tareas` (pg_cron: recordatorio 24 h,
+  aviso Telegram si no confirma, audio, resumen 20:00, eventos a Meta). Secretos en Supabase → Edge Functions.
+  · `citas/` — citas del día o 7 días; botones WhatsApp / Llegó / No llegó; alta y cambio manual.
+  · `leads/` — leads de WhatsApp, embudo (escribieron → platicaron → cita → llegaron → inscritas) y tabla por anuncio.
+  · `agente/` — Ajustes del agente (tabla `agente_config`): grupo, promoción con fecha de fin, precios, horario de
+    citas, días bloqueados. El agente la lee en cada mensaje: cambiar aquí, NO por script.
+  · `hoy/` muestra también las citas del día.
 - **`app/pagar/[token]/`** (PÚBLICA, sin login) — estado de cuenta de la alumna por su token;
   3 secciones: **Mensualidad**, **Uniforme**, **Certificado**; cada una con su botón de pago.
 - API: `app/api/pagos/checkout` (crea preferencia MP) y `app/api/pagos/webhook` (confirma).
@@ -213,6 +244,13 @@ netlify deploy --build --prod
   (`alumna_id` opcional, `hecho` bool). SQL: `supabase-recordatorios.sql` (ese archivo añade
   también `grupos.calendario_id`). Corrido en Aragón; FALTA en Atenea.
 - localStorage: `crm_categorias` (categorías de caja, por navegador).
+
+- **Agente/citas (nov 2026)** — SQL `supabase-agente-citas.sql` + `supabase-agente-citas-eventos.sql`:
+  `leads` (teléfono único, anuncio de origen, estado), `citas` (una activa por lead y una por horario),
+  `chat_mensajes` (memoria de la IA), `eventos_meta` (cola para la API de conversiones), `agente_config`,
+  `agente_sombra`. Disparadores: cita nueva → evento Schedule; estado `llego` → Asistio; alta/edición de
+  alumna con teléfono → enlaza su lead (últimos 10 dígitos), lo marca `inscrita` y encola Inscripcion.
+  Historial migrado de la BD de n8n con `scripts/migrar-historial-citas.js` (12 nov 2026).
 
 ## Mercado Pago
 - Checkout Pro, **producción activa**. App MP del usuario; webhook configurado a
