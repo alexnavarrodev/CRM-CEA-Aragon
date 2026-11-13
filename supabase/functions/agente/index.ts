@@ -113,11 +113,13 @@ async function procesar(ev: Evento) {
   if (ultimo && String(ultimo.contenido.cw_id) !== String(ev.id)) return
 
   const { data: cfg } = await db.from('agente_config').select('datos').limit(1).single()
-  const ctx: Contexto = { lead, conv, contacto: ev.conversation?.meta?.sender?.id ?? null, sombra, config: cfg!.datos as Config }
+  // Números de prueba (secreto AGENTE_PRUEBAS): en modo sombra sus citas se crean de verdad en el CRM, pero no se envía nada
+  const prueba = sombra && (Deno.env.get('AGENTE_PRUEBAS') ?? '').split(',').map(t => t.replace(/\D/g, '')).includes(telefono)
+  const ctx: Contexto = { lead, conv, contacto: ev.conversation?.meta?.sender?.id ?? null, sombra: sombra && !prueba, prueba, config: cfg!.datos as Config }
   try {
     const { texto: respuesta, usadas } = await generar(ctx, telefono)
     if (sombra) {
-      await db.from('agente_sombra').insert({ telefono, conversacion: conv, mensaje: texto, respuesta, herramientas: usadas })
+      await db.from('agente_sombra').insert({ telefono, conversacion: conv, mensaje: texto, respuesta: (prueba ? '[PRUEBA] ' : '') + respuesta, herramientas: usadas })
       return
     }
     if (!respuesta) return

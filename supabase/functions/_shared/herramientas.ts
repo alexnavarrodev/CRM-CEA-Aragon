@@ -3,7 +3,7 @@
 import { db, cwAbrir, cwRenombrar } from './servicios.ts'
 import { type Config, diaConCitas, horasDelDia, instante, horaMX, fechaMX, fechaLarga } from './fechas.ts'
 
-export type Contexto = { lead: { id: string; telefono: string; nombre: string | null }; conv: number | null; contacto: number | null; sombra: boolean; config: Config }
+export type Contexto = { lead: { id: string; telefono: string; nombre: string | null }; conv: number | null; contacto: number | null; sombra: boolean; prueba?: boolean; config: Config }
 
 const f = (name: string, description: string, properties: Record<string, unknown> = {}, required: string[] = []) =>
   ({ type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } })
@@ -95,12 +95,12 @@ export async function ejecutar(nombre: string, args: Record<string, string>, ctx
       if (!ctx.sombra) await db.from('leads').update({ interes_visita_at: new Date().toISOString() }).eq('id', ctx.lead.id)
       return { ok: true }
     case 'pasar_con_asesor':
-      if (!ctx.sombra && ctx.conv) await cwAbrir(ctx.conv)
+      if (!ctx.sombra && !ctx.prueba && ctx.conv) await cwAbrir(ctx.conv)
       return { ok: true }
     case 'actualizar_nombre':
       if (!ctx.sombra) {
         await db.from('leads').update({ nombre: args.nombre }).eq('id', ctx.lead.id)
-        if (ctx.contacto) await cwRenombrar(ctx.contacto, args.nombre).catch(() => null)
+        if (ctx.contacto && !ctx.prueba) await cwRenombrar(ctx.contacto, args.nombre).catch(() => null)
       }
       ctx.lead.nombre = args.nombre
       return { ok: true }
