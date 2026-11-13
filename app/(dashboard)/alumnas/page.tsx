@@ -15,6 +15,7 @@ type ExtrasAlumna = { uniforme: number; certificado: number; rcp: number }
 
 const STATUS_STYLES: Record<AlumnaStatus, { label: string; className: string }> = {
   activa:   { label: 'Activa',   className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  en_espera: { label: 'En espera', className: 'bg-amber-50 text-amber-700 border-amber-200' },
   egresada: { label: 'Egresada', className: 'bg-blue-50 text-blue-700 border-blue-200' },
   baja:     { label: 'Baja',     className: 'bg-red-50 text-red-600 border-red-200' },
 }
@@ -163,7 +164,7 @@ export default function AlumnasPage() {
 
         {/* Status + search */}
         <div className="flex items-center gap-3">
-          {(['todos', 'activa', 'egresada', 'baja'] as const).map(s => (
+          {(['todos', 'activa', 'en_espera', 'egresada', 'baja'] as const).map(s => (
             <button key={s} onClick={() => setStatusFiltro(s)}
               className={`px-3 py-1.5 rounded-full text-sm font-medium border transition ${statusFiltro === s ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
               {s === 'todos' ? 'Todas' : STATUS_STYLES[s].label}
@@ -579,6 +580,7 @@ function AlumnaModal({ alumna, grupos, extras, inicio, onSave, onSaveExtras, onB
               <select value={status} onChange={e => setStatus(e.target.value as AlumnaStatus)}
                 className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
                 <option value="activa">Activa</option>
+                <option value="en_espera">En espera (sin grupo, no paga colegiatura)</option>
                 <option value="egresada">Egresada</option>
                 <option value="baja">Baja</option>
               </select>

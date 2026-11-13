@@ -1,4 +1,5 @@
-export type AlumnaStatus = 'activa' | 'egresada' | 'baja'
+// en_espera: inscrita pero sin grupo por ahora (p. ej. espera que abra un grupo); no se le cobra colegiatura
+export type AlumnaStatus = 'activa' | 'en_espera' | 'egresada' | 'baja'
 export type AlumnaPrograma = 'colegiaturas' | 'bachillerato' | 'ambos'
 export type PagoEstado = 'pagado' | 'parcial' | 'pendiente'
 export type ProspectoStatus = 'nuevo' | 'contactado' | 'interesado' | 'inscrito' | 'no_interesado'

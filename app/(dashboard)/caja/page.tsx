@@ -818,7 +818,7 @@ function MovimientoModal({ categorias, onSave, onClose }: {
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return
-      supabase.from('alumnas').select('*').eq('user_id', user.id).eq('status', 'activa').order('nombre')
+      supabase.from('alumnas').select('*').eq('user_id', user.id).in('status', ['activa', 'en_espera']).order('nombre')
         .then(({ data }) => setAlumnas(data ?? []))
     })
   }, [])

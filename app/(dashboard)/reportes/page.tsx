@@ -32,6 +32,7 @@ export default async function ReportesPage() {
   const totalAlumnas = al.filter(a => a.status === 'activa').length
   const totalEgresadas = al.filter(a => a.status === 'egresada').length
   const totalBajas = al.filter(a => a.status === 'baja').length
+  const totalEnEspera = al.filter(a => a.status === 'en_espera').length
   const promedioProm = al.length > 0 ? (al.reduce((s, a) => s + Number(a.promedio), 0) / al.length).toFixed(1) : '0'
   const promedioAsist = al.length > 0 ? Math.round(al.reduce((s, a) => s + Number(a.asistencia_pct), 0) / al.length) : 0
 
@@ -79,7 +80,7 @@ export default async function ReportesPage() {
             <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Alumnas activas</span>
           </div>
           <p className="text-3xl font-bold text-slate-900">{totalAlumnas}</p>
-          <p className="text-xs text-slate-400 mt-1">{totalEgresadas} egresadas · {totalBajas} bajas</p>
+          <p className="text-xs text-slate-400 mt-1">{totalEgresadas} egresadas · {totalBajas} bajas{totalEnEspera > 0 && ` · ${totalEnEspera} en espera`}</p>
         </div>
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-2">
