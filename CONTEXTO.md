@@ -251,6 +251,12 @@ netlify deploy --build --prod
   `agente_sombra`. Disparadores: cita nueva → evento Schedule; estado `llego` → Asistio; alta/edición de
   alumna con teléfono → enlaza su lead (últimos 10 dígitos), lo marca `inscrita` y encola Inscripcion.
   Historial migrado de la BD de n8n con `scripts/migrar-historial-citas.js` (12 nov 2026).
+  Edge Functions (`supabase/functions/`, Deno): `agente` (webhook de Chatwoot «Message created», `?k=WEBHOOK_SECRET`;
+  `AGENTE_MODO` sombra|vivo), `entrada-twilio`, `tareas`. Despliegue: `npx supabase@3.1.0 functions deploy <f>
+  --remote=ouhikbqtwadppsuspsst --no-verify-jwt --use-api --import-map supabase/functions/deno.json --yes`.
+  **Simulador**: Agente WhatsApp → «Probar el agente» llama a `agente?simular=1` con la sesión del CRM; usa el lead
+  falso 520000000000 (opt_out), crea citas reales marcadas «🧪 Prueba» y «Empezar de nuevo» lo borra todo.
+  **CONFIRMO** solo se resuelve sin IA si ya se envió el recordatorio de 24 h de esa cita.
 
 ## Mercado Pago
 - Checkout Pro, **producción activa**. App MP del usuario; webhook configurado a
