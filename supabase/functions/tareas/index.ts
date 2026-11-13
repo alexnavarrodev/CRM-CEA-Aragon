@@ -42,6 +42,7 @@ async function audioBienvenida(log: string[]) {
   const { data } = await db.from('citas').select(CITA).eq('origen', 'agente').is('audio_enviado_at', null)
     .in('estado', ['agendada', 'confirmada']).gt('created_at', new Date(Date.now() - 2 * H).toISOString())
   for (const c of (data ?? []) as unknown as Cita[]) {
+    if (c.leads.opt_out) continue
     const t = c.leads.telefono
     await twilioEnviar(t, { Body: '¡Gracias por agendar! Escucha esto 👇 Te esperamos 💙' })
     await twilioEnviar(t, { MediaUrl: AUDIO })

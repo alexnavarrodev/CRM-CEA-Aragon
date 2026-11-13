@@ -34,7 +34,8 @@ const diaDe = (iso: string) => new Date(new Date(iso).getTime() - 6 * 3600000).t
 
 export default function CitasPage() {
   const [fecha, setFecha] = useState(hoyMX())
-  const [semana, setSemana] = useState(false)
+  const [vista, setVista] = useState<'proximas' | 'dia' | 'semana'>('proximas')
+  const semana = vista === 'semana'
   const [citas, setCitas] = useState<Cita[]>([])
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState<Cita | 'nueva' | null>(null)
@@ -42,14 +43,16 @@ export default function CitasPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const hasta = sumarDias(fecha, semana ? 7 : 1)
-    const { data } = await supabase.from('citas')
+    let q = supabase.from('citas')
       .select('id, inicio, fin, modalidad, estado, origen, recordatorio_24h_at, notas, leads!inner(id, nombre, telefono, anuncio_titulo)')
-      .gte('inicio', `${fecha}T00:00:00-06:00`).lt('inicio', `${hasta}T00:00:00-06:00`)
       .not('estado', 'in', '(cancelada,reagendada)').order('inicio')
+    q = vista === 'proximas'
+      ? q.gte('inicio', `${hoyMX()}T00:00:00-06:00`).limit(300)                     // de hoy en adelante, sin límite de días
+      : q.gte('inicio', `${fecha}T00:00:00-06:00`).lt('inicio', `${sumarDias(fecha, semana ? 7 : 1)}T00:00:00-06:00`)
+    const { data } = await q
     setCitas((data ?? []) as unknown as Cita[])
     setLoading(false)
-  }, [fecha, semana])
+  }, [fecha, vista])
 
   useEffect(() => { load() }, [load])
 
@@ -80,12 +83,18 @@ export default function CitasPage() {
           </div>
           <div className="flex items-center gap-2">
             <div className="flex rounded-xl border border-slate-200 overflow-hidden text-sm">
-              <button onClick={() => setSemana(false)} className={`px-3 py-2 ${!semana ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>Día</button>
-              <button onClick={() => setSemana(true)} className={`px-3 py-2 ${semana ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>7 días</button>
+              {([['proximas', 'Próximas'], ['dia', 'Día'], ['semana', '7 días']] as const).map(([v, label]) => (
+                <button key={v} onClick={() => setVista(v)} className={`px-3 py-2 ${vista === v ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>{label}</button>
+              ))}
             </div>
-            <button onClick={() => setFecha(sumarDias(fecha, semana ? -7 : -1))} className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50"><ChevronLeft className="w-4 h-4" /></button>
-            <button onClick={() => setFecha(hoyMX())} className="px-3 py-2 border border-slate-200 rounded-xl text-sm hover:bg-slate-50">Hoy</button>
-            <button onClick={() => setFecha(sumarDias(fecha, semana ? 7 : 1))} className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50"><ChevronRight className="w-4 h-4" /></button>
+            {vista !== 'proximas' && <>
+              <button onClick={() => setFecha(sumarDias(fecha, semana ? -7 : -1))} className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50"><ChevronLeft className="w-4 h-4" /></button>
+              <button onClick={() => setFecha(hoyMX())} className="px-3 py-2 border border-slate-200 rounded-xl text-sm hover:bg-slate-50">Hoy</button>
+              <button onClick={() => setFecha(sumarDias(fecha, semana ? 7 : 1))} className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50"><ChevronRight className="w-4 h-4" /></button>
+            </>}
+            <input type="date" title="Ir a una fecha" value={vista === 'proximas' ? '' : fecha}
+              onChange={e => { if (e.target.value) { setFecha(e.target.value); if (vista === 'proximas') setVista('dia') } }}
+              className="px-3 py-2 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50" />
             <button onClick={() => setModal('nueva')} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition shadow-sm">
               <Plus className="w-4 h-4" /> Nueva cita
             </button>
@@ -97,7 +106,7 @@ export default function CitasPage() {
         {loading ? (
           <div className="text-center py-16 text-slate-400">Cargando...</div>
         ) : citas.length === 0 ? (
-          <div className="text-center py-16 text-slate-400">No hay citas {semana ? 'en estos 7 días' : `el ${fechaTexto(fecha)}`}.</div>
+          <div className="text-center py-16 text-slate-400">No hay citas {vista === 'proximas' ? 'próximas' : semana ? 'en estos 7 días' : `el ${fechaTexto(fecha)}`}.</div>
         ) : Object.entries(porDia).map(([dia, lista]) => (
           <section key={dia}>
             <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">{fechaTexto(dia)}</h2>

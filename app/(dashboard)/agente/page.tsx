@@ -2,10 +2,11 @@
 
 // Ajustes del agente de WhatsApp: lo que cambia seguido (grupo que se ofrece, promoción, precios, horario de
 // citas). El agente lee esta tabla (agente_config) en cada mensaje, así que los cambios aplican al instante.
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { hoyMX } from '@/lib/fecha'
-import { Save, Plus, X, Bot } from 'lucide-react'
+import { Save, Plus, X, Bot, Send, RotateCcw } from 'lucide-react'
 
 type Grupo = { nombre: string; horario: string; inicio: string | null }
 type Config = {
@@ -150,8 +151,106 @@ export default function AgentePage() {
             </div>
           </div>
         </Tarjeta>
+
+        <ProbarAgente />
       </div>
     </div>
+  )
+}
+
+// ---------- Probar el agente: chat de prueba con la misma IA del WhatsApp ----------
+const TEL_SIM = '520000000000'
+type Herr = { nombre: string; args: Record<string, string>; resultado: Record<string, unknown> }
+type Msg = { rol: 'user' | 'assistant' | 'error'; texto: string; herramientas?: Herr[] }
+
+function accion(h: Herr): string | null {
+  const r = h.resultado ?? {}
+  if (r.error) return `⚠️ ${h.nombre}: ${r.error}`
+  switch (h.nombre) {
+    case 'agendar_cita': return `📅 Cita agendada: ${r.dia} a las ${r.hora}`
+    case 'reagendar_cita': return `🔁 Cita cambiada a: ${r.dia} a las ${r.hora}`
+    case 'cancelar_cita': return '❌ Cita cancelada'
+    case 'consultar_horarios': return `🔎 Revisó las horas libres del ${r.dia}`
+    case 'ver_mi_cita': return '🔎 Buscó su cita'
+    case 'pasar_con_asesor': return '🙋 Pasó la conversación a un asesor (la IA dejaría de responder)'
+    case 'actualizar_nombre': return `📝 Guardó el nombre: ${h.args?.nombre}`
+    case 'registrar_interes_visita': return '📍 Anotó que visitará el plantel sin cita'
+    default: return null
+  }
+}
+
+function ProbarAgente() {
+  const supabase = createClient()
+  const [msgs, setMsgs] = useState<Msg[]>([])
+  const [texto, setTexto] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const fin = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    supabase.from('chat_mensajes').select('rol, contenido').eq('telefono', TEL_SIM).order('created_at').order('id')
+      .then(({ data }) => setMsgs((data ?? []).map((m: { rol: string; contenido: { texto?: string; herramientas?: Herr[] } }) =>
+        ({ rol: m.rol === 'user' ? 'user' : 'assistant', texto: m.contenido.texto ?? '', herramientas: m.contenido.herramientas }))))
+  }, [])
+  useEffect(() => { fin.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }, [msgs, enviando])
+
+  const llamar = async (cuerpo: object) => {
+    const { data: { session } } = await supabase.auth.getSession()
+    const r = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/agente?simular=1`, {
+      method: 'POST', headers: { Authorization: `Bearer ${session?.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) })
+    return r.json().catch(() => ({ error: `Error ${r.status}` }))
+  }
+
+  const enviar = async () => {
+    const t = texto.trim()
+    if (!t || enviando) return
+    setTexto(''); setEnviando(true)
+    setMsgs(m => [...m, { rol: 'user', texto: t }])
+    const r = await llamar({ texto: t })
+    setMsgs(m => [...m, r.error ? { rol: 'error', texto: r.error } : { rol: 'assistant', texto: r.respuesta || '(sin respuesta)', herramientas: r.herramientas }])
+    setEnviando(false)
+  }
+
+  const reiniciar = async () => {
+    if (!confirm('¿Empezar de nuevo? Se borra esta conversación de prueba y las citas que se hayan creado en ella.')) return
+    await llamar({ reiniciar: true })
+    setMsgs([])
+  }
+
+  return (
+    <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 lg:col-span-2">
+      <div className="flex items-start justify-between gap-3 mb-1">
+        <h2 className="font-semibold text-slate-900">Probar el agente</h2>
+        <button onClick={reiniciar} className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50">
+          <RotateCcw className="w-3.5 h-3.5" /> Empezar de nuevo
+        </button>
+      </div>
+      <p className="text-sm text-slate-400 mb-4">
+        Escribe como si fueras un cliente. Contesta la misma IA del WhatsApp con estos ajustes (guárdalos antes de probar).
+        Las citas que agende se crean de verdad y las verás en <Link href="/citas" className="text-blue-600 hover:underline">Citas</Link> marcadas como 🧪 Prueba. No se envía nada por WhatsApp.
+      </p>
+      <div className="h-96 overflow-y-auto rounded-xl bg-[#efeae2] p-4 space-y-2">
+        {msgs.length === 0 && <p className="text-center text-sm text-slate-500 mt-32">Escribe un mensaje para empezar, por ejemplo: «Hola, quiero información»</p>}
+        {msgs.map((m, i) => (
+          <div key={i} className={`flex flex-col ${m.rol === 'user' ? 'items-end' : 'items-start'}`}>
+            {m.herramientas?.map((h, j) => { const a = accion(h); return a && <span key={j} className="text-xs text-slate-600 bg-white/70 rounded-full px-2.5 py-0.5 mb-1">{a}</span> })}
+            <div className={`max-w-[80%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap shadow-sm ${
+              m.rol === 'user' ? 'bg-[#d9fdd3] text-slate-900' : m.rol === 'error' ? 'bg-red-50 text-red-700' : 'bg-white text-slate-900'}`}>
+              {m.texto}
+            </div>
+          </div>
+        ))}
+        {enviando && <div className="text-xs text-slate-500">El agente está escribiendo…</div>}
+        <div ref={fin} />
+      </div>
+      <div className="flex gap-2 mt-3">
+        <input className={input} placeholder="Escribe un mensaje…" value={texto} disabled={enviando}
+          onChange={e => setTexto(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') enviar() }} />
+        <button onClick={enviar} disabled={enviando || !texto.trim()}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+          <Send className="w-4 h-4" /> Enviar
+        </button>
+      </div>
+    </section>
   )
 }
 

@@ -85,10 +85,12 @@ async function procesar(ev: Evento) {
   await db.from('leads').update({ mensajes: (lead.mensajes ?? 0) + 1, ultimo_mensaje: new Date().toISOString(),
     ...(lead.estado === 'nuevo' && (lead.mensajes ?? 0) >= 1 ? { estado: 'platicando' } : {}) }).eq('id', lead.id)
 
-  // CONFIRMO al recordatorio de 24 h: se resuelve sin IA
+  // CONFIRMO al recordatorio de 24 h: se resuelve sin IA, pero solo si ya se le mandó ese recordatorio.
+  // Si no (p. ej. contesta «confirmo» cuando la IA le pregunta si agenda), lo atiende la IA como cualquier mensaje.
   if (soloLetras(texto) === 'confirmo') {
     const { data: cita } = await db.from('citas').select('id, inicio, modalidad').eq('lead_id', lead.id)
-      .in('estado', ['agendada', 'confirmada']).gte('inicio', new Date().toISOString()).order('inicio').limit(1).maybeSingle()
+      .in('estado', ['agendada', 'confirmada']).not('recordatorio_24h_at', 'is', null)
+      .gte('inicio', new Date().toISOString()).order('inicio').limit(1).maybeSingle()
     if (cita) {
       if (sombra) {
         await db.from('agente_sombra').insert({ telefono, conversacion: conv, mensaje: texto, respuesta: '[CONFIRMO: se marcaría la cita como confirmada]' })
@@ -113,13 +115,11 @@ async function procesar(ev: Evento) {
   if (ultimo && String(ultimo.contenido.cw_id) !== String(ev.id)) return
 
   const { data: cfg } = await db.from('agente_config').select('datos').limit(1).single()
-  // Números de prueba (secreto AGENTE_PRUEBAS): en modo sombra sus citas se crean de verdad en el CRM, pero no se envía nada
-  const prueba = sombra && (Deno.env.get('AGENTE_PRUEBAS') ?? '').split(',').map(t => t.replace(/\D/g, '')).includes(telefono)
-  const ctx: Contexto = { lead, conv, contacto: ev.conversation?.meta?.sender?.id ?? null, sombra: sombra && !prueba, prueba, config: cfg!.datos as Config }
+  const ctx: Contexto = { lead, conv, contacto: ev.conversation?.meta?.sender?.id ?? null, sombra, config: cfg!.datos as Config }
   try {
     const { texto: respuesta, usadas } = await generar(ctx, telefono)
     if (sombra) {
-      await db.from('agente_sombra').insert({ telefono, conversacion: conv, mensaje: texto, respuesta: (prueba ? '[PRUEBA] ' : '') + respuesta, herramientas: usadas })
+      await db.from('agente_sombra').insert({ telefono, conversacion: conv, mensaje: texto, respuesta, herramientas: usadas })
       return
     }
     if (!respuesta) return
@@ -136,7 +136,47 @@ async function procesar(ev: Evento) {
   }
 }
 
+// ---------- Simulador del CRM (Agente WhatsApp → Probar el agente) ----------
+// Misma IA, prompt y herramientas; las citas se crean de verdad (para verlas en Citas) pero no se envía nada por WhatsApp.
+const TEL_SIM = '520000000000'
+const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, apikey, x-client-info' }
+const json = (d: unknown, status = 200) => new Response(JSON.stringify(d), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
+const LEAD = 'id, telefono, nombre, mensajes, estado'
+
+async function simular(req: Request) {
+  const { data: u } = await db.auth.getUser((req.headers.get('authorization') ?? '').replace(/^Bearer /i, ''))
+  if (!u?.user) return json({ error: 'Inicia sesión en el CRM' }, 401)
+  const { texto, reiniciar } = await req.json().catch(() => ({})) as { texto?: string; reiniciar?: boolean }
+  let { data: lead } = await db.from('leads').select(LEAD).eq('telefono', TEL_SIM).maybeSingle()
+  if (reiniciar) {
+    if (lead) {
+      await db.from('eventos_meta').delete().eq('lead_id', lead.id)
+      await db.from('citas').delete().eq('lead_id', lead.id)
+      await db.from('chat_mensajes').delete().eq('lead_id', lead.id)
+      await db.from('leads').delete().eq('id', lead.id)
+    }
+    return json({ ok: true })
+  }
+  if (!texto?.trim()) return json({ error: 'Mensaje vacío' }, 400)
+  if (!lead) {
+    const r = await db.from('leads').insert({ telefono: TEL_SIM, fuente: 'manual', opt_out: true }).select(LEAD).single()
+    if (r.error) return json({ error: r.error.message }, 500)
+    lead = r.data
+  }
+  await guardar(lead, 'user', { texto: texto.trim() })
+  const { data: cfg } = await db.from('agente_config').select('datos').limit(1).single()
+  const ctx: Contexto = { lead, conv: null, contacto: null, sombra: false, prueba: true, config: cfg!.datos as Config }
+  try {
+    const { texto: respuesta, usadas } = await generar(ctx, TEL_SIM)
+    if (respuesta) await guardar(lead, 'assistant', { texto: respuesta, herramientas: usadas.length ? usadas : undefined })
+    return json({ respuesta, herramientas: usadas })
+  } catch (e) {
+    return json({ error: String(e) }, 500)
+  }
+}
+
 Deno.serve(async (req) => {
+  if (new URL(req.url).searchParams.has('simular')) return req.method === 'OPTIONS' ? new Response('ok', { headers: CORS }) : simular(req)
   if (req.method !== 'POST') return new Response('ok')
   if (!secretoValido(req)) return new Response('no autorizado', { status: 401 })
   const ev = await req.json().catch(() => null) as Evento | null

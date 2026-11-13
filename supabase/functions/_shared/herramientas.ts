@@ -63,7 +63,7 @@ export async function ejecutar(nombre: string, args: Record<string, string>, ctx
       if (mal) return { error: mal }
       if (ctx.sombra) return { ok: true, simulado: true, dia: fechaLarga(args.fecha), hora: args.hora }
       const { error } = await db.from('citas').insert({ lead_id: ctx.lead.id, inicio: instante(args.fecha, args.hora).toISOString(),
-        fin: fin(args.fecha, args.hora).toISOString(), modalidad: args.modalidad, origen: 'agente' })
+        fin: fin(args.fecha, args.hora).toISOString(), modalidad: args.modalidad, origen: 'agente', notas: ctx.prueba ? '🧪 Prueba (simulador del CRM)' : null })
       if (error) return { error: error.code === '23505' ? 'Esa hora se acaba de ocupar; ofrece otra.' : 'Fallo técnico al agendar.' }
       await db.from('leads').update({ estado: 'cita', nombre: args.nombre || ctx.lead.nombre }).eq('id', ctx.lead.id)
       return { ok: true, dia: fechaLarga(args.fecha), hora: args.hora }
